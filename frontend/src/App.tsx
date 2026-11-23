@@ -6,9 +6,12 @@ import DiaryListPage from './components/DiaryListPage';
 import TimeCapsuleListPage from './components/TimeCapsuleListPage';
 import TimeCapsuleWritePage from './components/TimeCapsuleWritePage';
 import AutobiographyPage from './components/AutobiographyPage';
+import ProfilePage from './components/ProfilePage';
+import ProfileEditPage from './components/ProfileEditPage';
+import RecipientArchivePage from './components/RecipientArchivePage';
 
 function App() {
-  const [route, setRoute] = useState<string>('/interviews');
+  const [route, setRoute] = useState<string>('/recipient-archive');
 
   const handleLogout = () => {
     localStorage.removeItem('accessToken');
@@ -38,6 +41,18 @@ function App() {
 
   if (route === '/interviews') {
     return <AutobiographyPage onLogout={handleLogout} onNavigate={(path) => setRoute(path)} />;
+  }
+
+  if (route === '/profile/edit') {
+    return <ProfileEditPage onLogout={handleLogout} onNavigate={(path) => setRoute(path)} />;
+  }
+
+  if (route === '/profile') {
+    return <ProfilePage onLogout={handleLogout} onNavigate={(path) => setRoute(path)} />;
+  }
+
+  if (route === '/recipient-archive') {
+    return <RecipientArchivePage onLogout={handleLogout} onNavigate={(path) => setRoute(path)} />;
   }
 
   return <MainPage onLogout={handleLogout} onNavigate={(path) => setRoute(path)} />;
