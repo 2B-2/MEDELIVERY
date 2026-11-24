@@ -141,5 +141,8 @@ dist
 # SvelteKit build / generate output
 .svelte-kit
 
-# End of https://www.toptal.com/developers/gitignore/api/nodenode_modules/
-.env
+# Local persistent store data (exclude test data from GitHub)
+backend/db/data.json
+.medelivery-data.json
+
+# End of https://www.toptal.com/developers/gitignore/api/node

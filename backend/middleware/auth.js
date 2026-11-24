@@ -1,86 +1,55 @@
-﻿const jwt = require('jsonwebtoken');
-const store = require('../data/store');
+const jwt = require('jsonwebtoken');
+const { store } = require('../db/store');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-insecure-secret';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
-// 일반 사용자 인증 + 활동 시각(last_active_at) 자동 갱신
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const asyncHandler = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+
+/**
+ * 사용자 인증 미들웨어
+ * - 토큰 검증 후 req.user에 로그인한 사용자 객체를 주입합니다.
+ */
 const authenticate = (req, res, next) => {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
 
   if (scheme !== 'Bearer' || !token) {
-    return res.status(401).json({
-      success: false,
-      error: { status: 401, message: '인증 토큰이 필요합니다. (Authorization: Bearer <token>)' },
-    });
+    throw new HttpError(401, '인증 토큰이 필요합니다. (Authorization: Bearer <token>)');
   }
 
+  let payload;
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    if (payload.type === 'archive') {
-      return res.status(403).json({
-        success: false,
-        error: { status: 403, message: '유족 열람 전용 토큰으로는 접근할 수 없습니다.' },
-      });
-    }
-
-    const user = store.users.find((u) => u.user_id === payload.sub);
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: { status: 401, message: '존재하지 않는 사용자입니다.' },
-      });
-    }
-
-    // [DMS-01] 인증 API 호출 시 마지막 활동 시각 자동 갱신
-    user.last_active_at = new Date().toISOString();
-    req.user = user;
-    next();
+    payload = jwt.verify(token, JWT_SECRET);
   } catch (err) {
-    return res.status(401).json({
-      success: false,
-      error: { status: 401, message: '유효하지 않거나 만료된 토큰입니다.' },
-    });
+    if (err.name === 'TokenExpiredError') {
+      throw new HttpError(401, '토큰이 만료되었습니다. 다시 로그인해 주세요.');
+    }
+    throw new HttpError(401, '유효하지 않은 토큰입니다.');
   }
+
+  const user = store.users.find((u) => u.user_id === Number(payload.sub));
+  if (!user) {
+    throw new HttpError(401, '존재하지 않는 사용자입니다.');
+  }
+
+  user.last_active_at = new Date().toISOString();
+  req.user = user;
+  next();
 };
 
-// 유족(수신자) 아카이브 전용 토큰 인증
-const authenticateArchive = (req, res, next) => {
-  const header = req.headers.authorization || '';
-  const [scheme, token] = header.split(' ');
-
-  if (scheme !== 'Bearer' || !token) {
-    return res.status(401).json({
-      success: false,
-      error: { status: 401, message: '유족 열람 토큰이 필요합니다.' },
-    });
-  }
-
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    if (payload.type !== 'archive') {
-      return res.status(403).json({
-        success: false,
-        error: { status: 403, message: '유효한 유족 아카이브 토큰이 아닙니다.' },
-      });
-    }
-
-    const user = store.users.find((u) => u.user_id === payload.sub);
-    if (!user || !user.is_code_verified || !user.is_transferred) {
-      return res.status(403).json({
-        success: false,
-        error: { status: 403, message: '아카이브 열람 권한이 승인되지 않았습니다.' },
-      });
-    }
-
-    req.targetUser = user;
-    next();
-  } catch (err) {
-    return res.status(401).json({
-      success: false,
-      error: { status: 401, message: '유효하지 않거나 만료된 유족 토큰입니다.' },
-    });
-  }
+module.exports = {
+  JWT_SECRET,
+  JWT_EXPIRES_IN,
+  HttpError,
+  asyncHandler,
+  authenticate,
 };
-
-module.exports = { authenticate, authenticateArchive, JWT_SECRET };

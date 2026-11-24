@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MEDELIVERY - 타임캡슐 보안 초대 코드 인증 및 열람</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet">
+  <!-- PDF 파일 다운로드용 html2pdf 라이브러리 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    :root {
+      --bg-outer: #F2ECE3;
+      --bg-card: #FAF6F0;
+      --border: #DFD5C8;
+      --primary: #8C6239;
+      --primary-hover: #75502B;
+      --text-dark: #2C221A;
+      --text-muted: #8C7A68;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg-outer);
+      font-family: 'Noto Sans KR', sans-serif;
+      color: var(--text-dark);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* 1. 보안 초대 코드 6자리 입력 카드 (피그마 디자인 완벽 반영) */
+    .invite-card {
+      width: 100%;
+      max-width: 580px;
+      background: var(--bg-card);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(44, 34, 26, 0.08);
+      padding: 48px 40px 40px;
+      text-align: center;
+      border: 1px solid #EAE2D7;
+    }
+    .key-icon-wrap {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: #EFE9DF;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      color: var(--primary);
+    }
+    .invite-title {
+      font-family: 'Noto Serif KR', serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-dark);
+      margin: 0 0 12px;
+      letter-spacing: -0.02em;
+    }
+    .invite-desc {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin: 0 0 28px;
+    }
+    .code-inputs {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .code-box {
+      width: 62px;
+      height: 66px;
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      background: #FFFFFF;
+      font-size: 24px;
+      font-weight: 700;
+      text-align: center;
+      color: var(--text-dark);
+      outline: none;
+      transition: all 0.15s;
+      caret-color: var(--primary);
+    }
+    .code-box:focus {
+      background: #FFFFFF;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(140, 98, 57, 0.18);
+    }
+    .quick-input-wrap {
+      max-width: 422px;
+      margin: 0 auto 24px;
+    }
+    .quick-input {
+      width: 100%;
+      height: 40px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: #F7F3ED;
+      padding: 0 14px;
+      font-size: 13px;
+      text-align: center;
+      color: var(--text-dark);
+      outline: none;
+    }
+    .quick-input:focus {
+      background: #FFFFFF;
+      border-style: solid;
+      border-color: var(--primary);
+    }
+    .submit-btn {
+      width: 100%;
+      height: 54px;
+      background: var(--primary);
+      color: #FFFFFF;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-bottom: 24px;
+    }
+    .submit-btn:hover {
+      background: var(--primary-hover);
+    }
+    .help-text {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .help-text a {
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .error-msg {
+      color: #C62828;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    /* 2. 개봉된 타임캡슐 열람 및 PDF 다운로드 화면 */
+    .capsule-view {
+      display: none;
+      width: 100%;
+      max-width: 680px;
+    }
+    .expiry-banner {
+      background: #FFF3E0;
+      border: 1px solid #FFE0B2;
+      color: #E65100;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .letter-paper {
+      background: #FAF6F0;
+      border: 1px solid #E5DCCF;
+      border-radius: 20px;
+      padding: 44px 42px;
+      box-shadow: 0 10px 30px rgba(44, 34, 26, 0.08);
+    }
+    .letter-tag {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: var(--primary);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .letter-title {
+      font-family: 'Noto Serif KR', serif;
+      font-size: 26px;
+      font-weight: 700;
+      margin: 0 0 14px;
+      color: var(--text-dark);
+    }
+    .letter-meta {
+      font-size: 13px;
+      color: var(--text-muted);
+      border-bottom: 1px solid #E5DCCF;
+      padding-bottom: 18px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .letter-body {
+      font-size: 15px;
+      line-height: 1.85;
+      color: #3A2E24;
+      white-space: pre-wrap;
+      min-height: 180px;
+    }
+    .letter-footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px dashed #DFD5C8;
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: right;
+    }
+    .action-bar {
+      margin-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .pdf-btn {
+      flex: 1;
+      height: 50px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .pdf-btn:hover { background: var(--primary-hover); }
+    .back-btn {
+      height: 50px;
+      padding: 0 20px;
+      background: #EFE8DE;
+      color: var(--text-dark);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- [화면 1] 보안 초대 코드 6자리 입력 모달 (피그마 디자인) -->
+  <div id="inviteSection" class="invite-card">
+    <div class="key-icon-wrap">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+      </svg>
+    </div>
+
+    <h1 class="invite-title">보안 초대 코드를 입력해 주세요</h1>
+    <p class="invite-desc">
+      전달받으신 6자리 보안 코드 또는 PIN 번호를 입력하시면<br />
+      남겨진 기록을 확인하실 수 있습니다.
+    </p>
+
+    <div class="code-inputs" id="codeInputs">
+      <input type="text" class="code-box" data-idx="0" autocomplete="off" spellcheck="false" />
+      <input type="text" class="code-box" data-idx="1" autocomplete="off" spellcheck="false" />
+      <input type="text" class="code-box" data-idx="2" autocomplete="off" spellcheck="false" />
+      <input type="text" class="code-box" data-idx="3" autocomplete="off" spellcheck="false" />
+      <input type="text" class="code-box" data-idx="4" autocomplete="off" spellcheck="false" />
+      <input type="text" class="code-box" data-idx="5" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <!-- 한 번에 타이핑하거나 붙여넣기 편한 보조 입력창 (위 6칸과 실시간 양방향 동기화) -->
+    <div class="quick-input-wrap">
+      <input
+        type="text"
+        id="quickCodeInput"
+        class="quick-input"
+        maxlength="6"
+        placeholder="여기에 6자리 코드를 한 번에 입력하거나 붙여넣기(Ctrl+V) 하셔도 됩니다"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+
+    <div id="errorMsg" class="error-msg"></div>
+
+    <button type="button" class="submit-btn" onclick="submitInviteCode()">
+      기록 열람하기
+    </button>
+
+    <p class="help-text">
+      코드를 전달받지 못하셨나요? <a href="/test">(문의하기 / 테스트 콘솔로 이동)</a>
+    </p>
+  </div>
+
+  <!-- [화면 2] 코드 인증 완료 후 열리는 타임캡슐 페이지 & PDF 다운로드 -->
+  <div id="capsuleSection" class="capsule-view">
+    <div class="expiry-banner">
+      <span>⏳ <strong>자동 삭제 안내:</strong> 첫 수신자 방문 시각 기준 <strong>14일 후</strong> 이 페이지는 영구 삭제됩니다.</span>
+      <span id="expiryTimer" style="font-weight:700;"></span>
+    </div>
+
+    <!-- PDF로 변환될 편지지 영역 -->
+    <div id="pdfContentArea" class="letter-paper">
+      <div class="letter-tag">MEDELIVERY TIME CAPSULE & ARCHIVE</div>
+      <h2 id="viewTitle" class="letter-title">타임캡슐 제목</h2>
+      <div class="letter-meta">
+        <span id="viewAuthor">작성자: -</span>
+        <span id="viewOpenDate">개봉 지정일: -</span>
+      </div>
+      <div id="viewMessage" class="letter-body"></div>
+      <div class="letter-footer">
+        <div>최초 열람 시각: <span id="viewFirstVisited">-</span></div>
+        <div>자동 삭제 예정 시각 (14일 후): <span id="viewExpiresAt">-</span></div>
+      </div>
+    </div>
+
+    <div class="action-bar">
+      <button type="button" class="pdf-btn" onclick="downloadCapsulePdf()">
+        📄 기록 PDF 파일로 다운로드
+      </button>
+      <button type="button" class="back-btn" onclick="location.reload()">
+        코드 다시 입력
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const boxes = Array.from(document.querySelectorAll('.code-box'));
+    const quickInput = document.getElementById('quickCodeInput');
+    const params = new URLSearchParams(window.location.search);
+    const prefillCode = params.get('code');
+
+    function setCodeToBoxes(rawStr) {
+      const cleaned = String(rawStr || '').trim().slice(0, 6);
+      boxes.forEach((box, i) => {
+        box.value = cleaned[i] || '';
+      });
+      if (quickInput && quickInput.value !== cleaned) {
+        quickInput.value = cleaned;
+      }
+    }
+
+    function syncBoxesToQuickInput() {
+      const combined = boxes.map((b) => b.value).join('');
+      if (quickInput) quickInput.value = combined;
+      return combined;
+    }
+
+    // URL에 ?code=xxxxxx 가 있으면 자동 채우기
+    if (prefillCode) {
+      setCodeToBoxes(prefillCode);
+    }
+
+    // 페이지 열릴 때 첫 번째 칸에 자동 포커스
+    window.addEventListener('DOMContentLoaded', () => {
+      if (!prefillCode && boxes[0]) {
+        boxes[0].focus();
+      }
+    });
+
+    // 보조 통합 입력창에 타이핑 시 6칸 박스에 실시간 동기화
+    quickInput.addEventListener('input', (e) => {
+      setCodeToBoxes(e.target.value);
+    });
+    quickInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitInviteCode();
+    });
+
+    // 6칸 개별 박스 이벤트 (클릭 시 전체 선택, 여러 글자 붙여넣기, 덮어쓰기 완벽 지원)
+    boxes.forEach((box, idx) => {
+      box.addEventListener('focus', () => {
+        box.select();
+      });
+
+      box.addEventListener('input', (e) => {
+        const val = String(e.target.value || '').trim();
+        if (!val) {
+          box.value = '';
+          syncBoxesToQuickInput();
+          return;
+        }
+
+        // 만약 한 칸에 2글자 이상 들어온 경우(붙여넣기나 자동완성) 현재 칸부터 순서대로 분배
+        if (val.length > 1) {
+          for (let i = 0; i < val.length && idx + i < 6; i++) {
+            boxes[idx + i].value = val[i];
+          }
+          const nextIdx = Math.min(idx + val.length, 5);
+          boxes[nextIdx].focus();
+        } else {
+          box.value = val.slice(-1);
+          if (idx < 5) {
+            boxes[idx + 1].focus();
+          }
+        }
+        syncBoxesToQuickInput();
+      });
+
+      box.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace') {
+          if (box.value) {
+            box.value = '';
+            syncBoxesToQuickInput();
+            e.preventDefault();
+          } else if (idx > 0) {
+            boxes[idx - 1].value = '';
+            boxes[idx - 1].focus();
+            syncBoxesToQuickInput();
+            e.preventDefault();
+          }
+        } else if (e.key === 'ArrowLeft' && idx > 0) {
+          boxes[idx - 1].focus();
+          e.preventDefault();
+        } else if (e.key === 'ArrowRight' && idx < 5) {
+          boxes[idx + 1].focus();
+          e.preventDefault();
+        } else if (e.key === 'Enter') {
+          submitInviteCode();
+        }
+      });
+
+      box.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const pasted = (e.clipboardData || window.clipboardData).getData('text').trim();
+        if (!pasted) return;
+        setCodeToBoxes(pasted);
+        const focusIdx = Math.min(pasted.length, 5);
+        if (boxes[focusIdx]) boxes[focusIdx].focus();
+      });
+    });
+
+    async function submitInviteCode() {
+      const boxCode = boxes.map((b) => b.value).join('').trim();
+      const quickCode = String(quickInput.value || '').trim();
+      const code = boxCode.length === 6 ? boxCode : quickCode;
+
+      const errorEl = document.getElementById('errorMsg');
+      errorEl.style.display = 'none';
+
+      if (code.length !== 6) {
+        errorEl.textContent = `6자리 보안 초대 코드를 모두 입력해 주세요. (현재 ${code.length}자리 입력됨)`;
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const res = await fetch('/api/time-capsules/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_code: code,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = result.error?.message || '코드 인증에 실패했습니다.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const d = result.data;
+      document.getElementById('viewTitle').textContent = d.title;
+      document.getElementById('viewAuthor').textContent = `보낸 사람: ${d.author_name}`;
+      document.getElementById('viewOpenDate').textContent = `개봉 지정일: ${new Date(d.open_date).toLocaleString('ko-KR')}`;
+      document.getElementById('viewMessage').textContent = d.message;
+      document.getElementById('viewFirstVisited').textContent = new Date(d.first_visited_at).toLocaleString('ko-KR');
+      document.getElementById('viewExpiresAt').textContent = new Date(d.expires_at).toLocaleString('ko-KR');
+      document.getElementById('expiryTimer').textContent = `남은 열람 기간: D-${d.remaining_days}`;
+
+      document.getElementById('inviteSection').style.display = 'none';
+      document.getElementById('capsuleSection').style.display = 'block';
+    }
+
+    function downloadCapsulePdf() {
+      const element = document.getElementById('pdfContentArea');
+      const title = document.getElementById('viewTitle').textContent || '타임캡슐';
+      const opt = {
+        margin: 12,
+        filename: `MEDELIVERY_${title}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#FAF6F0' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      };
+
+      if (window.html2pdf) {
+        window.html2pdf().set(opt).from(element).save();
+      } else {
+        window.print();
+      }
+    }
+  </script>
+</body>
+</html>
