@@ -1,0 +1,23 @@
+{
+  "name": "medelivery-backend",
+  "version": "2.0.0",
+  "description": "MEDELIVERY 통합 백엔드 API 서버 (DB 설계서 및 기능 명세서 ACC-01 ~ CAP-02 기반)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^6.9.16"
+  },
+  "type": "commonjs"
+}
