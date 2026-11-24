@@ -6,6 +6,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const {
+  initMysqlAndLoadStore,
+  syncStoreToMysql,
+  getMysqlStatus,
+} = require('./mysql');
 
 // backend 폴더 바깥(루트 폴더)에 저장하여 `node --watch index.js`의 무한 재시작 방지!
 const DATA_FILE_PATH = path.resolve(__dirname, '..', '..', '.medelivery-data.json');
@@ -77,6 +82,8 @@ function saveStoreToDisk() {
   try {
     const payload = JSON.stringify({ store, seq }, null, 2);
     fs.writeFileSync(DATA_FILE_PATH, payload, 'utf8');
+    // AWS RDS (MySQL)가 연결되어 있으면 MySQL 5개 테이블에도 즉시 비동기 동기화!
+    syncStoreToMysql(store).catch(() => {});
   } catch (err) {
     console.warn('[DataStore] 자동 저장 실패:', err.message);
   }
@@ -100,12 +107,15 @@ function resetStore() {
   try {
     if (fs.existsSync(DATA_FILE_PATH)) fs.unlinkSync(DATA_FILE_PATH);
     if (fs.existsSync(LEGACY_FILE_PATH)) fs.unlinkSync(LEGACY_FILE_PATH);
+    syncStoreToMysql(store).catch(() => {});
   } catch (err) {
     console.warn('[DataStore] 데이터 파일 삭제 실패:', err.message);
   }
 }
 
 loadStoreFromDisk();
+// .env에 AWS RDS (DB_HOST)가 설정되어 있으면 자동으로 MySQL 5개 테이블 생성 및 데이터 로드!
+initMysqlAndLoadStore(store, seq).catch(() => {});
 
 function toPublicUser(user) {
   if (!user) return null;
@@ -162,4 +172,5 @@ module.exports = {
   generateSixCharInviteCode,
   saveStoreToDisk,
   resetStore,
+  getMysqlStatus,
 };

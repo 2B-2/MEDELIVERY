@@ -417,6 +417,48 @@
         <button onclick="sendRealTestEmail()">📧 입력한 주소로 실제 타임캡슐 초대 이메일 즉시 발송하기</button>
       </div>
     </div>
+
+    <!-- 7. AWS RDS (MySQL) 연동 전 사전 검증(Dry-Run) 및 실시간 연결 테스트 -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2><span class="badge">AWS RDS / MySQL</span>7. AWS RDS (MySQL) 연동 전 사전 검증 & 실시간 DB 연결 테스트 (`/api/db`)</h2>
+      <p style="margin:0; font-size:12.5px; color:#5C4B3B; line-height:1.5;">
+        • <strong>① 연동 전 사전 검증 (Dry-Run):</strong> AWS RDS나 MySQL을 아직 만들지 않은 상태에서도, 현재 백엔드의 5개 테이블 스키마(<code>schema.sql</code>), 외래키(FK) 무결성, 실제 실행될 <code>INSERT INTO</code> SQL 쿼리가 100% 정상인지 즉시 시뮬레이션 검증합니다.<br/>
+        • <strong>② 실제 AWS RDS / MySQL 연결 테스트:</strong> AWS RDS 엔드포인트(또는 로컬 MySQL `localhost`) 정보를 입력하고 누르면 즉시 접속하여 <strong>5개 테이블 자동 생성 및 현재 데이터 동기화</strong>를 완료합니다.
+      </p>
+      <div class="btn-row">
+        <button onclick="runDbDryRun()">🔍 ① AWS RDS 연동 전 SQL 스키마 & 쿼리 사전 검증 (Dry-Run 실행)</button>
+      </div>
+      <div class="sms-box" id="dbVerifyPreview" style="max-height:180px; overflow-y:auto;">
+        <strong>🗄️ DB 스키마 및 SQL 쿼리 검증 결과:</strong><br/>
+        <span style="color:#7D6E60;">위 [① 사전 검증 (Dry-Run 실행)] 버튼을 누르면 5개 테이블 검증 결과와 변환된 MySQL INSERT 쿼리가 표시됩니다.</span>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:end; margin-top:4px;">
+        <div>
+          <label>MySQL 호스트 (DB_HOST)</label>
+          <input id="db_host" placeholder="xxx.rds.amazonaws.com 또는 localhost" />
+        </div>
+        <div>
+          <label>포트 (DB_PORT)</label>
+          <input id="db_port" type="number" value="3306" />
+        </div>
+        <div>
+          <label>사용자 (DB_USER)</label>
+          <input id="db_user" value="admin" />
+        </div>
+        <div>
+          <label>비밀번호 (DB_PASSWORD)</label>
+          <input id="db_password" type="password" placeholder="RDS 마스터 암호" />
+        </div>
+        <div>
+          <label>DB 이름 (DB_NAME)</label>
+          <input id="db_name" value="medelivery" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="secondary" onclick="testLiveMysqlConnect()">🔌 ② 입력한 AWS RDS / MySQL에 실제 연결 & 5개 테이블 자동 생성하기</button>
+        <button onclick="viewLiveMysqlTables()">📊 ③ AWS RDS 내 5개 테이블 실제 데이터 직접 조회 (`SELECT *`)</button>
+      </div>
+    </div>
   </div>
 
   <div class="log-panel">
@@ -723,8 +765,12 @@
       const { status, data } = await api('GET', '/api/store-status');
       if (status === 200 && data.counts) {
         const c = data.counts;
+        const dbMode = data.db?.connected ? `AWS RDS (${data.db.host})` : '로컬 디스크';
+        if (data.db?.host && !document.getElementById('db_host').value) {
+          document.getElementById('db_host').value = data.db.host;
+        }
         document.getElementById('storeStatusBadge').innerHTML =
-          `(디스크 저장됨: 회원 <strong>${c.users}</strong>명, 일기 <strong>${c.diaries}</strong>건, 자서전 <strong>${c.interviews}</strong>단원, 타임캡슐 <strong>${c.time_capsules}</strong>개)`;
+          `(${dbMode} 저장됨: 회원 <strong>${c.users}</strong>명, 일기 <strong>${c.diaries}</strong>건, 자서전 <strong>${c.interviews}</strong>단원, 타임캡슐 <strong>${c.time_capsules}</strong>개)`;
       }
     }
 
@@ -804,6 +850,61 @@
         simulate_expired_account_id: accountId,
       });
       await checkSavedStoreStatus();
+    }
+
+    // 7. AWS RDS (MySQL) 연동 전 사전 검증 (Dry-Run) 및 실시간 연결 테스트
+    async function runDbDryRun() {
+      const { status, data } = await api('GET', '/api/db/dry-run');
+      if (status === 200 && data.report) {
+        const r = data.report;
+        const sqlHtml = (r.sql_migration_preview || [])
+          .map((line) => `<div style="font-family:Consolas,monospace;font-size:12px;color:#2C221A;padding:2px 0;">${line}</div>`)
+          .join('');
+        document.getElementById('dbVerifyPreview').innerHTML = `
+          <strong>✅ AWS RDS 연동 준비 상태: <span style="color:#2E7D32;">${r.ready_for_aws_rds ? '100% 통과 (즉시 연동 가능)' : '점검 필요'}</span></strong>
+          &nbsp;| 현재 저장 모드: <strong>${r.current_storage_mode}</strong><br/>
+          • 검증된 5개 테이블 (schema.sql): <strong>${r.schema_check.verified_tables.join(', ')}</strong><br/>
+          • 외래키(FK) 및 컬럼 무결성 검사: <strong>${r.foreign_key_and_column_integrity.passed ? '이상 없음 (0건)' : r.foreign_key_and_column_integrity.issues.join(', ')}</strong><br/>
+          <div style="margin-top:6px; border-top:1px dashed #C7B299; padding-top:6px;">
+            <strong>실제 AWS RDS에 실행될 MySQL INSERT 쿼리 시뮬레이션:</strong>
+            ${sqlHtml}
+          </div>
+        `;
+      }
+    }
+
+    async function testLiveMysqlConnect() {
+      const { status, data } = await api('POST', '/api/db/test-connect', {
+        host: document.getElementById('db_host').value,
+        port: document.getElementById('db_port').value,
+        user: document.getElementById('db_user').value,
+        password: document.getElementById('db_password').value,
+        database: document.getElementById('db_name').value,
+      });
+      if (status === 200 && data.data) {
+        document.getElementById('dbVerifyPreview').innerHTML = `
+          <strong style="color:#2E7D32;">🎉 AWS RDS / MySQL (${data.data.host}) 실제 연결 및 동기화 성공! (.env에 자동 저장됨)</strong><br/>
+          • 데이터베이스: <strong>${data.data.database}</strong><br/>
+          • 생성 확인된 테이블 목록: <strong>${data.data.tables_in_db.join(', ')}</strong>
+        `;
+        await checkSavedStoreStatus();
+        await viewLiveMysqlTables();
+      }
+    }
+
+    async function viewLiveMysqlTables() {
+      const { status, data } = await api('GET', '/api/db/live-tables');
+      if (status === 200 && data.data) {
+        const t = data.data.tables_data;
+        document.getElementById('dbVerifyPreview').innerHTML = `
+          <strong style="color:#1565C0;">📊 ${data.data.source} 실시간 SELECT * 조회 결과:</strong><br/>
+          • <strong>users 테이블 (${t.users.length}행):</strong> ${t.users.map((u) => `[user_id=${u.user_id}] ${u.account_id} (${u.username})`).join(', ') || '없음'}<br/>
+          • <strong>diaries 테이블 (${t.diaries.length}행):</strong> ${t.diaries.map((d) => `[diary_id=${d.diary_id}] ${d.title}`).join(', ') || '없음'}<br/>
+          • <strong>interviews 테이블 (${t.interviews.length}행):</strong> ${t.interviews.map((i) => `[interview_id=${i.interview_id}] ${i.chapter_name}`).join(', ') || '없음'}<br/>
+          • <strong>interviewQs 테이블 (${t.interviewQs.length}행):</strong> 문답 기록 총 ${t.interviewQs.length}개 저장됨<br/>
+          • <strong>time_capsules 테이블 (${t.time_capsules.length}행):</strong> ${t.time_capsules.map((c) => `[capsule_id=${c.capsule_id}] ${c.title}`).join(', ') || '없음'}
+        `;
+      }
     }
   </script>
 </body>

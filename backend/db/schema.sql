@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   account_id VARCHAR(50) NOT NULL UNIQUE COMMENT '로그인 아이디',
   password VARCHAR(255) NOT NULL COMMENT '비밀번호 해시 값',
   username VARCHAR(50) NOT NULL COMMENT '사용자 이름',
-  emergency_contact VARCHAR(20) NOT NULL COMMENT '비상 수신자 전화번호',
+  emergency_contact VARCHAR(100) NOT NULL COMMENT '비상 수신자 전화번호 또는 이메일',
   inactivity_days INT DEFAULT 90 COMMENT '미접속 기준 일수',
   last_active_at DATETIME NULL COMMENT '마지막 활동 시각',
   access_code VARCHAR(100) NULL UNIQUE COMMENT '수신자 고유 인증 코드',

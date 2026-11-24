@@ -12,7 +12,18 @@ const {
   router: deadmanRouter,
   processDeadmanSwitchLifecycle,
 } = require('./routes/deadman');
-const { store, saveStoreToDisk, resetStore } = require('./db/store');
+const {
+  store,
+  seq,
+  saveStoreToDisk,
+  resetStore,
+  getMysqlStatus,
+} = require('./db/store');
+const {
+  verifySqlCompatibilityDryRun,
+  testAndConnectLiveMysql,
+  queryAllMysqlTablesDirectly,
+} = require('./db/mysql');
 const {
   router: timeCapsulesRouter,
   processTimeCapsuleLifecycle,
@@ -61,10 +72,11 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'MEDELIVERY Backend API' });
 });
 
-// 현재 디스크(.medelivery-data.json)에 저장된 전체 데이터 요약 조회 (로그인 없이도 저장 상태 즉시 확인 가능)
+// 현재 디스크(.medelivery-data.json) 또는 AWS RDS(MySQL)에 저장된 전체 데이터 요약 조회
 app.get('/api/store-status', (req, res) => {
   res.status(200).json({
     success: true,
+    db: getMysqlStatus(),
     counts: {
       users: store.users.length,
       diaries: store.diaries.length,
@@ -91,7 +103,57 @@ app.post('/api/reset-store', (req, res) => {
   });
 });
 
-// 브라우저 웹 테스트 콘솔 (/test 또는 /)
+// [AWS RDS / MySQL 연동 전 사전 검증 (Dry-Run) API]
+// MySQL 설치나 AWS RDS 생성 전에도 5개 테이블 스키마, FK 무결성, 실제 실행될 SQL INSERT 쿼리를 검증합니다.
+app.get('/api/db/dry-run', (req, res) => {
+  const report = verifySqlCompatibilityDryRun(store);
+  res.status(200).json({
+    success: true,
+    message: report.ready_for_aws_rds
+      ? 'AWS RDS (MySQL) 5개 테이블 스키마 및 현재 데이터 SQL 호환성 사전 검증(Dry-Run)을 100% 통과했습니다!'
+      : '스키마 또는 데이터 무결성 확인이 필요합니다.',
+    report,
+  });
+});
+
+// [실제 AWS RDS / MySQL 연결 테스트 및 5개 테이블 즉시 자동 생성 API]
+app.post('/api/db/test-connect', async (req, res, next) => {
+  try {
+    const { host, port, user, password, database } = req.body || {};
+    const result = await testAndConnectLiveMysql(
+      { host, port, user, password, database },
+      store,
+      seq
+    );
+    res.status(200).json({
+      success: true,
+      message: `AWS RDS / MySQL(${result.host}) 연결 및 5개 테이블 구축·동기화 완료!`,
+      data: result,
+    });
+  } catch (err) {
+    res.status(400).json({
+      success: false,
+      error: { status: 400, message: err.message },
+    });
+  }
+});
+
+// [실제 AWS RDS / MySQL 5개 테이블에 직접 SELECT * 쿼리를 날려 실시간 DB 데이터 확인]
+app.get('/api/db/live-tables', async (req, res) => {
+  try {
+    const liveData = await queryAllMysqlTablesDirectly();
+    res.status(200).json({
+      success: true,
+      message: 'AWS RDS (MySQL) 5개 테이블 실시간 직접 조회(SELECT *) 결과입니다.',
+      data: liveData,
+    });
+  } catch (err) {
+    res.status(400).json({
+      success: false,
+      error: { status: 400, message: err.message },
+    });
+  }
+});
 app.get(['/', '/test'], (req, res) => {
   res.sendFile(path.join(__dirname, 'test.html'));
 });
