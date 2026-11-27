@@ -11,17 +11,17 @@ const ROUTES = {
   profile: '/profile',
 } as const;
 
-// 화면 전환이 연결된 경로 목록 ('/time-capsules/new' 포함)
 const IMPLEMENTED_ROUTES: string[] = [
   ROUTES.main,
   ROUTES.archive,
   ROUTES.diaries,
   ROUTES.timeCapsules,
   ROUTES.timeCapsuleWrite,
+  ROUTES.interviews,
+  ROUTES.profile,
 ];
 
-const API_BASE_URL = 'http://localhost:4000/api';
-const LOCAL_CAPSULES_KEY = 'medelivery_local_capsules';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 
 // API 명세서 v2.0 기준 타입 정의 (CAP-02: time_capsules)
 interface UserProfile {
@@ -37,58 +37,13 @@ interface TimeCapsuleItem {
   message: string | null;
   open_date: string;
   is_opened: boolean;
+  access_code?: string | null;
 }
 
 interface TimeCapsuleListPageProps {
   onLogout?: () => void;
   onNavigate?: (path: string) => void;
 }
-
-// 백엔드 미실행 시에도 화면을 바로 확인할 수 있는 초기 샘플 데이터 (v2.0 스키마 동일)
-const MOCK_CAPSULES: TimeCapsuleItem[] = [
-  {
-    capsule_id: 6,
-    user_id: 1,
-    title: '서른의 나에게',
-    message: null,
-    open_date: '2028-02-20T00:00:00.000Z',
-    is_opened: false,
-  },
-  {
-    capsule_id: 5,
-    user_id: 1,
-    title: '우리의 10주년',
-    message: null,
-    open_date: '2027-08-12T00:00:00.000Z',
-    is_opened: false,
-  },
-  {
-    capsule_id: 4,
-    user_id: 1,
-    title: '한 해 뒤의 오늘',
-    message: null,
-    open_date: '2027-01-01T00:00:00.000Z',
-    is_opened: false,
-  },
-  {
-    capsule_id: 3,
-    user_id: 1,
-    title: '다시 만나는 겨울',
-    message:
-      '작년의 겨울은 생각보다 차가웠지만, 그 시간을 지나온 지금의 나는 조금 더 단단해졌기를 바란다. 오늘의 다짐을 잊지 말고 한 걸음씩 나아가자.',
-    open_date: '2026-02-20T00:00:00.000Z',
-    is_opened: true,
-  },
-  {
-    capsule_id: 2,
-    user_id: 1,
-    title: '수고했어, 올해의 나',
-    message:
-      '설레었던 날도, 주저앉았던 날도 모두 나의 소중한 한 해였어. 스스로에게 가장 따뜻한 박수를 보내주길.',
-    open_date: '2025-12-31T00:00:00.000Z',
-    is_opened: true,
-  },
-];
 
 function formatDotDate(dateString: string): string {
   const date = new Date(dateString);
@@ -112,13 +67,10 @@ export default function TimeCapsuleListPage({
   onLogout,
   onNavigate,
 }: TimeCapsuleListPageProps) {
-  const [user, setUser] = useState<UserProfile>({
-    user_id: 1,
-    account_id: 'fin_user',
-    username: 'FIN',
-  });
-  const [capsules, setCapsules] = useState<TimeCapsuleItem[]>(MOCK_CAPSULES);
-  const [isLoading, setIsLoading] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [capsules, setCapsules] = useState<TimeCapsuleItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string>('');
 
   // 검색 및 정렬 상태 (기본값: 최신순 'latest')
   const [searchQuery, setSearchQuery] = useState('');
@@ -132,36 +84,27 @@ export default function TimeCapsuleListPage({
   } | null>(null);
   const [isCheckingDetail, setIsCheckingDetail] = useState(false);
 
-  // 사용자 정보 및 타임캡슐 목록 조회 (CAP-02: GET /api/time-capsules + 로컬 작성 캡슐 반영)
+  // 사용자 정보 및 타임캡슐 목록 조회 (CAP-02: GET /api/time-capsules)
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
-        const parsed = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(JSON.parse(savedUser));
       } catch {
-        // 기본값 유지
+        // 파싱 실패 시 무시
       }
-    }
-
-    // TimeCapsuleWritePage에서 새로 봉인한 캡슐이 있으면 함께 표시
-    try {
-      const localRaw = localStorage.getItem(LOCAL_CAPSULES_KEY);
-      if (localRaw) {
-        const localCapsules: TimeCapsuleItem[] = JSON.parse(localRaw);
-        if (Array.isArray(localCapsules) && localCapsules.length > 0) {
-          setCapsules([...localCapsules, ...MOCK_CAPSULES]);
-        }
-      }
-    } catch {
-      // 파싱 실패 시 기본 목록 유지
     }
 
     const token = localStorage.getItem('accessToken');
-    if (!token) return;
+    if (!token) {
+      setIsLoading(false);
+      if (onLogout) onLogout();
+      return;
+    }
 
     const fetchCapsules = async () => {
       setIsLoading(true);
+      setFetchError('');
       try {
         const response = await fetch(`${API_BASE_URL}/time-capsules`, {
           headers: {
@@ -169,21 +112,35 @@ export default function TimeCapsuleListPage({
             Authorization: `Bearer ${token}`,
           },
         });
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && Array.isArray(result.data)) {
-            setCapsules(result.data);
-          }
+
+        if (response.status === 401) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('user');
+          if (onLogout) onLogout();
+          return;
+        }
+
+        const result = await response.json();
+        if (response.ok && result.success && Array.isArray(result.data)) {
+          setCapsules(result.data);
+        } else {
+          setFetchError(
+            result?.error?.message || '타임캡슐 목록을 불러오지 못했습니다.'
+          );
         }
       } catch {
-        // 백엔드 서버 미실행 시 로컬 데이터 유지
+        setFetchError(
+          '서버(http://3.26.210.69:4000)에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.'
+        );
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchCapsules();
-  }, []);
+  }, [onLogout]);
+
+  const displayName = user?.username || user?.account_id || '사용자';
 
   // 검색어 필터링 및 저장된 최신순 정렬 (capsule_id 내림차순)
   const visibleCapsules = useMemo(() => {
@@ -220,64 +177,60 @@ export default function TimeCapsuleListPage({
       return;
     }
 
-    alert(`'${label}' 화면으로 이동합니다. (임시 연결 경로: ${path})`);
+    alert(`'${label}' 화면으로 이동합니다. (${path})`);
   };
 
   // 타임캡슐 카드 클릭 시 조건부 개봉 제어 및 상세 조회 (CAP-02: GET /api/time-capsules/:capsule_id)
   const handleOpenCapsule = async (capsule: TimeCapsuleItem) => {
     const token = localStorage.getItem('accessToken');
-
-    if (token) {
-      setIsCheckingDetail(true);
-      try {
-        const response = await fetch(`${API_BASE_URL}/time-capsules/${capsule.capsule_id}`, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const result = await response.json();
-
-        if (response.ok && result.success && result.data) {
-          setCapsules((prev) =>
-            prev.map((item) =>
-              item.capsule_id === capsule.capsule_id ? result.data : item
-            )
-          );
-          setOpenedModalCapsule(result.data);
-          return;
-        }
-
-        if (response.status === 403) {
-          setSealedNoticeCapsule({
-            capsule,
-            reason:
-              result.error?.message ||
-              `아직 개봉 지정일(${formatDotDate(capsule.open_date)})이 도래하지 않아 열람할 수 없습니다.`,
-          });
-          return;
-        }
-      } catch {
-        // 백엔드 미실행 시 아래 클라이언트 시간 기준 확인으로 진행
-      } finally {
-        setIsCheckingDetail(false);
-      }
+    if (!token) {
+      if (onLogout) onLogout();
+      return;
     }
 
-    const isNowOpenable =
-      capsule.is_opened || new Date().getTime() >= new Date(capsule.open_date).getTime();
+    setIsCheckingDetail(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/time-capsules/${capsule.capsule_id}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    if (isNowOpenable) {
-      setOpenedModalCapsule({
-        ...capsule,
-        is_opened: true,
-        message: capsule.message || '지정된 개봉일이 도래하여 타임캡슐이 열렸습니다.',
-      });
-    } else {
-      setSealedNoticeCapsule({
-        capsule,
-        reason: `아직 개봉 지정일(${formatDotDate(capsule.open_date)})이 도래하지 않아 열람할 수 없습니다.`,
-      });
+      if (response.status === 401) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('user');
+        if (onLogout) onLogout();
+        return;
+      }
+
+      const result = await response.json();
+
+      if (response.ok && result.success && result.data) {
+        setCapsules((prev) =>
+          prev.map((item) =>
+            item.capsule_id === capsule.capsule_id ? result.data : item
+          )
+        );
+        setOpenedModalCapsule(result.data);
+        return;
+      }
+
+      if (response.status === 403) {
+        setSealedNoticeCapsule({
+          capsule,
+          reason:
+            result?.error?.message ||
+            `아직 개봉 지정일(${formatDotDate(capsule.open_date)})이 도래하지 않아 열람할 수 없습니다.`,
+        });
+        return;
+      }
+
+      alert(result?.error?.message || '타임캡슐 정보를 확인하지 못했습니다.');
+    } catch {
+      alert('서버(http://3.26.210.69:4000)에 연결할 수 없습니다.');
+    } finally {
+      setIsCheckingDetail(false);
     }
   };
 
@@ -362,15 +315,15 @@ export default function TimeCapsuleListPage({
             <a
               href={ROUTES.profile}
               onClick={(e) =>
-                handleNavigate(e, ROUTES.profile, `${user.username}님 프로필 및 데드맨 스위치 설정`)
+                handleNavigate(e, ROUTES.profile, `${displayName}님 프로필 및 데드맨 스위치 설정`)
               }
               className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-[#F2ECE3] hover:bg-[#E8DFD2] border border-[#E8E1D9] transition-colors"
             >
               <span className="w-6 h-6 rounded-full bg-[#9B7348] text-white text-[11px] font-bold flex items-center justify-center">
-                {(user.username || 'F').slice(0, 1).toUpperCase()}
+                {displayName.slice(0, 1).toUpperCase()}
               </span>
               <span className="text-xs font-semibold text-[#3E2D1E]">
-                {user.username || 'FIN'}님
+                {displayName}님
               </span>
             </a>
 
@@ -389,6 +342,12 @@ export default function TimeCapsuleListPage({
 
       {/* 메인 콘텐츠 컨테이너 */}
       <main className="max-w-[1040px] mx-auto px-5 sm:px-8 py-9 sm:py-11">
+        {fetchError && (
+          <div className="mb-6 p-3.5 rounded-2xl bg-[#FCEEEA] border border-[#F3D1C8] text-xs text-[#A84A3A] font-medium">
+            {fetchError}
+          </div>
+        )}
+
         {/* 상단 타이틀 & 오른쪽 '+ 새 캡슐 만들기' 버튼 */}
         <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
           <div>
@@ -403,7 +362,6 @@ export default function TimeCapsuleListPage({
             </p>
           </div>
 
-          {/* 오른쪽 새 캡슐 만들기 버튼 -> TimeCapsuleWritePage로 이동 */}
           <button
             type="button"
             onClick={(e) => handleNavigate(e, ROUTES.timeCapsuleWrite, '새 타임캡슐 만들기')}
@@ -431,7 +389,6 @@ export default function TimeCapsuleListPage({
         {/* 타임캡슐 검색창 및 최신순 정렬 바 */}
         <section className="mb-6">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            {/* 검색 입력창 */}
             <div className="relative flex-1">
               <svg
                 className="w-4 h-4 text-[#9E9286] absolute left-4 top-1/2 -translate-y-1/2"
@@ -462,7 +419,6 @@ export default function TimeCapsuleListPage({
               )}
             </div>
 
-            {/* 우측 총 개수 & 최신순 정렬 선택 */}
             <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
               <span className="text-xs text-[#8C7A68]">
                 총 <strong className="text-[#2C221A]">{visibleCapsules.length}</strong>개의 캡슐
@@ -481,7 +437,7 @@ export default function TimeCapsuleListPage({
           </div>
         </section>
 
-        {/* 최신순 타임캡슐 카드 그리드 */}
+        {/* 타임캡슐 카드 그리드 */}
         <section>
           {isLoading ? (
             <div className="w-full py-20 text-center text-xs text-[#8C7A68]">

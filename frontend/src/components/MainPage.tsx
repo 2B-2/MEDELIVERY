@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 
-// 페이지 연결 경로 (구현 완료된 경로 및 임시 라우트 경로)
 const TEMP_ROUTES = {
   main: '/main',
   archive: '/archive',
@@ -12,17 +11,17 @@ const TEMP_ROUTES = {
   profile: '/profile',
 } as const;
 
-// 화면 전환이 연결된 경로 목록
 const IMPLEMENTED_ROUTES: string[] = [
   TEMP_ROUTES.main,
   TEMP_ROUTES.archive,
   TEMP_ROUTES.diaries,
   TEMP_ROUTES.diaryWrite,
   TEMP_ROUTES.timeCapsules,
-  TEMP_ROUTES.timeCapsuleWrite
+  TEMP_ROUTES.timeCapsuleWrite,
+  TEMP_ROUTES.interviews,
+  TEMP_ROUTES.profile,
 ];
 
-// API 명세서 v2.0 기준 타입 정의
 interface UserProfile {
   user_id: number;
   account_id: string;
@@ -75,68 +74,7 @@ interface MainPageProps {
   onNavigate?: (path: string) => void;
 }
 
-// 백엔드 미연결 시에도 화면을 바로 확인할 수 있는 초기 샘플 데이터 (v2.0 스키마 동일)
-const MOCK_USER: UserProfile = {
-  user_id: 1,
-  account_id: 'fin_user',
-  username: 'FIN',
-  emergency_contact: '010-1234-5678',
-  inactivity_days: 90,
-  last_active_at: new Date().toISOString(),
-};
-
-const MOCK_DIARIES: DiaryItem[] = [
-  {
-    diary_id: 1,
-    user_id: 1,
-    title: '오랜만에 만난 우리',
-    content: '한강 공원을 천천히 걸으며 그동안 나누지 못했던 이야기를 오래도록 나누었다.',
-    created_at: '2026-11-15T14:20:00.000Z',
-  },
-  {
-    diary_id: 2,
-    user_id: 1,
-    title: '봄을 기다리는 오후',
-    content: '창가로 들어오는 햇살이 유난히 따뜻해서 좋아하는 음악을 틀어두고 차를 마셨다.',
-    created_at: '2026-11-10T09:30:00.000Z',
-  },
-];
-
-const MOCK_CAPSULES: TimeCapsuleItem[] = [
-  {
-    capsule_id: 1,
-    user_id: 1,
-    title: '서른의 나에게',
-    message: null,
-    open_date: '2028-02-20T00:00:00.000Z',
-    is_opened: false,
-  },
-  {
-    capsule_id: 2,
-    user_id: 1,
-    title: '우리의 10주년',
-    message: '함께 걸어온 모든 계절에 고마움을 담아 이 편지를 남깁니다.',
-    open_date: '2026-10-01T00:00:00.000Z',
-    is_opened: true,
-  },
-];
-
-const MOCK_INTERVIEWS: InterviewItem[] = [
-  {
-    interview_id: 1,
-    user_id: 1,
-    chapter_name: '나의 찬란했던 스무 살',
-    created_at: '2026-11-12T18:00:00.000Z',
-  },
-  {
-    interview_id: 2,
-    user_id: 1,
-    chapter_name: '어린 날의 여름',
-    created_at: '2026-11-05T11:15:00.000Z',
-  },
-];
-
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
@@ -148,10 +86,12 @@ function formatDate(dateString: string): string {
 }
 
 export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
-  const [user, setUser] = useState<UserProfile>(MOCK_USER);
-  const [diaries, setDiaries] = useState<DiaryItem[]>(MOCK_DIARIES);
-  const [capsules, setCapsules] = useState<TimeCapsuleItem[]>(MOCK_CAPSULES);
-  const [interviews, setInterviews] = useState<InterviewItem[]>(MOCK_INTERVIEWS);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [diaries, setDiaries] = useState<DiaryItem[]>([]);
+  const [capsules, setCapsules] = useState<TimeCapsuleItem[]>([]);
+  const [interviews, setInterviews] = useState<InterviewItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string>('');
 
   // 히어로 배너 슬라이드 상태
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -161,21 +101,24 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
   const [activeTab, setActiveTab] = useState<ArchiveCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 로그인 토큰이 있으면 백엔드 API(v2.0)에서 실제 데이터 불러오기
+  // 백엔드 API(v2.0)에서 실제 데이터 불러오기
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
     const savedUser = localStorage.getItem('user');
 
     if (savedUser) {
       try {
-        const parsed = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(JSON.parse(savedUser));
       } catch {
-        // 파싱 실패 시 기본값 유지
+        // 파싱 실패 시 무시
       }
     }
 
-    if (!token) return;
+    if (!token) {
+      setIsLoading(false);
+      if (onLogout) onLogout();
+      return;
+    }
 
     const headers = {
       'Content-Type': 'application/json',
@@ -183,6 +126,9 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
     };
 
     const fetchArchiveData = async () => {
+      setIsLoading(true);
+      setFetchError('');
+
       try {
         const [meRes, diariesRes, capsulesRes, interviewsRes] = await Promise.all([
           fetch(`${API_BASE_URL}/auth/me`, { headers }),
@@ -191,29 +137,53 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
           fetch(`${API_BASE_URL}/interviews`, { headers }),
         ]);
 
+        if (meRes.status === 401) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('user');
+          if (onLogout) onLogout();
+          return;
+        }
+
         if (meRes.ok) {
           const meJson = await meRes.json();
-          if (meJson.success && meJson.data) setUser(meJson.data);
+          if (meJson.success && meJson.data) {
+            setUser(meJson.data);
+            localStorage.setItem('user', JSON.stringify(meJson.data));
+          }
         }
+
         if (diariesRes.ok) {
           const diariesJson = await diariesRes.json();
-          if (diariesJson.success && Array.isArray(diariesJson.data)) setDiaries(diariesJson.data);
+          if (diariesJson.success && Array.isArray(diariesJson.data)) {
+            setDiaries(diariesJson.data);
+          }
         }
+
         if (capsulesRes.ok) {
           const capsulesJson = await capsulesRes.json();
-          if (capsulesJson.success && Array.isArray(capsulesJson.data)) setCapsules(capsulesJson.data);
+          if (capsulesJson.success && Array.isArray(capsulesJson.data)) {
+            setCapsules(capsulesJson.data);
+          }
         }
+
         if (interviewsRes.ok) {
           const interviewsJson = await interviewsRes.json();
-          if (interviewsJson.success && Array.isArray(interviewsJson.data)) setInterviews(interviewsJson.data);
+          if (interviewsJson.success && Array.isArray(interviewsJson.data)) {
+            setInterviews(interviewsJson.data);
+          }
         }
       } catch {
-        // 백엔드 서버가 아직 꺼져 있을 경우 샘플 데이터 유지
+        setFetchError('서버(http://3.26.210.69:4000)에서 데이터를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchArchiveData();
-  }, []);
+  }, [onLogout]);
+
+  const displayName = user?.username || user?.account_id || '사용자';
+  const inactivityDays = user?.inactivity_days ?? 90;
 
   // 움직이는 배너 슬라이드 데이터
   const bannerSlides = useMemo(
@@ -221,17 +191,17 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
       {
         id: 'welcome',
         eyebrow: 'TODAY WITH MEDELIVERY',
-        title: `${user.username || 'FIN'}님, 오늘도 좋은 하루예요.`,
+        title: `${displayName}님, 오늘도 좋은 하루예요.`,
         subtitle: '평범한 오늘도 기록하면 특별한 이야기가 돼요.',
       },
       {
         id: 'deadman',
-        eyebrow: `DEADMAN SWITCH · ${user.inactivity_days}일 기준 활성화`,
+        eyebrow: `DEADMAN SWITCH · ${inactivityDays}일 기준 활성화`,
         title: '데드맨 스위치',
         subtitle: '오늘의 접속으로 활동 시각이 안전하게 갱신되었어요. 소중한 기록이 보호되고 있습니다.',
       },
     ],
-    [user.username, user.inactivity_days]
+    [displayName, inactivityDays]
   );
 
   // 배너 자동 슬라이드 타이머 (4.5초 간격)
@@ -298,7 +268,7 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
     });
   }, [allItems, activeTab, searchQuery]);
 
-  // 페이지 이동 핸들러 (연결된 경로는 즉시 전환, 미구현 경로는 임시 안내)
+  // 페이지 이동 핸들러
   const handleNavigate = (
     e: MouseEvent<HTMLAnchorElement | HTMLButtonElement>,
     path: string,
@@ -312,7 +282,7 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
       return;
     }
 
-    alert(`'${label}' 화면으로 이동합니다. (임시 연결 경로: ${path})`);
+    alert(`'${label}' 화면으로 이동합니다. (${path})`);
   };
 
   return (
@@ -402,14 +372,14 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
           <div className="flex items-center gap-2.5">
             <a
               href={TEMP_ROUTES.profile}
-              onClick={(e) => handleNavigate(e, TEMP_ROUTES.profile, `${user.username}님 프로필 및 데드맨 스위치 설정`)}
+              onClick={(e) => handleNavigate(e, TEMP_ROUTES.profile, `${displayName}님 프로필 및 데드맨 스위치 설정`)}
               className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-[#F2ECE3] hover:bg-[#E8DFD2] border border-[#E8E1D9] transition-colors"
             >
               <span className="w-6 h-6 rounded-full bg-[#9B7348] text-white text-[11px] font-bold flex items-center justify-center">
-                {(user.username || 'F').slice(0, 1).toUpperCase()}
+                {displayName.slice(0, 1).toUpperCase()}
               </span>
               <span className="text-xs font-semibold text-[#3E2D1E]">
-                {user.username || 'FIN'}님
+                {displayName}님
               </span>
             </a>
 
@@ -428,6 +398,12 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
 
       {/* 메인 콘텐츠 컨테이너 */}
       <main className="max-w-[1040px] mx-auto px-5 sm:px-8 py-8 sm:py-10">
+        {fetchError && (
+          <div className="mb-6 p-3.5 rounded-2xl bg-[#FCEEEA] border border-[#F3D1C8] text-xs text-[#A84A3A] font-medium">
+            {fetchError}
+          </div>
+        )}
+
         {/* 1. 움직이는 히어로 배너 */}
         <section
           onMouseEnter={() => setIsBannerPaused(true)}
@@ -437,7 +413,6 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
             background: 'linear-gradient(125deg, #EAD8C3 0%, #F5ECE0 48%, #E3C7A6 100%)',
           }}
         >
-          {/* 슬라이드 트랙 */}
           <div
             className="flex transition-transform duration-700 ease-in-out"
             style={{ transform: `translateX(-${currentSlide * 100}%)` }}
@@ -576,13 +551,19 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
           </div>
 
           {/* 필터링된 아카이브 카드 그리드 */}
-          {filteredItems.length === 0 ? (
+          {isLoading ? (
+            <div className="w-full py-16 bg-white/70 border border-[#E8E1D9] rounded-2xl text-center">
+              <p className="text-sm font-medium text-[#7D6E60]">
+                아카이브 기록을 불러오는 중입니다...
+              </p>
+            </div>
+          ) : filteredItems.length === 0 ? (
             <div className="w-full py-16 bg-white/70 border border-[#E8E1D9] rounded-2xl text-center">
               <p className="text-sm font-medium text-[#7D6E60] mb-1">
                 표시할 기록이 없습니다.
               </p>
               <p className="text-xs text-[#9E9286]">
-                새로운 일기나 타임캡슐을 작성해 첫 번째 이야기를 채워보세요.
+                새로운 일기나 타임캡슐, 자서전을 작성해 첫 번째 이야기를 채워보세요.
               </p>
             </div>
           ) : (
@@ -591,12 +572,15 @@ export default function MainPage({ onLogout, onNavigate }: MainPageProps) {
                 <article
                   key={item.uid}
                   onClick={() => {
-                    if (item.category === 'diary' && onNavigate) {
-                      window.history.pushState({}, '', TEMP_ROUTES.diaries);
-                      onNavigate(TEMP_ROUTES.diaries);
-                      return;
-                    }
-                    alert(`[${item.categoryLabel}] "${item.title}" 상세 페이지로 연결됩니다.`);
+                    const targetRoute =
+                      item.category === 'diary'
+                        ? TEMP_ROUTES.diaries
+                        : item.category === 'capsule'
+                        ? TEMP_ROUTES.timeCapsules
+                        : TEMP_ROUTES.interviews;
+
+                    window.history.pushState({}, '', targetRoute);
+                    if (onNavigate) onNavigate(targetRoute);
                   }}
                   className="group bg-white hover:bg-[#FFFDF9] border border-[#E8E1D9] hover:border-[#C9B398] rounded-2xl p-4 flex items-center gap-4 shadow-2xs transition-all cursor-pointer"
                 >

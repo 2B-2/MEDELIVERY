@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 
-// 추후 페이지 연결을 위한 임시 라우트 경로
 const TEMP_ROUTES = {
   main: '/main',
   archive: '/archive',
   diaryList: '/diaries',
-  diaryWrite: '/diaries/new', // 새 일기장(일기 쓰기) 생성 임시 주소
+  diaryWrite: '/diaries/new',
   timeCapsules: '/time-capsules',
   interviews: '/interviews',
   profile: '/profile',
 } as const;
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 
-// API 명세서 v2.0 기준 타입 정의 (MEM-02)
 interface UserProfile {
   user_id: number;
   account_id: string;
@@ -33,89 +31,31 @@ interface DiaryListPageProps {
   onNavigate?: (path: string) => void;
 }
 
-// 피그마 시안의 6개 일기 카드 초기 샘플 데이터 (최신순 정렬 확인용)
-const MOCK_DIARIES: DiaryItem[] = [
-  {
-    diary_id: 6,
-    user_id: 1,
-    title: '겨울 끝의 포근한 저녁',
-    content:
-      '찬 바람이 불어오는 저녁, 창가에 앉아 따뜻한 차 한 잔을 마시며 오늘 하루의 온기를 천천히 되짚어 보았다.',
-    created_at: '2026-11-17T19:30:00.000Z',
-  },
-  {
-    diary_id: 5,
-    user_id: 1,
-    title: '엄마와 걷던 길',
-    content:
-      '오래된 골목길을 나란히 걸으며 어린 시절 이야기를 나누었다. 평범한 발걸음이 오래도록 기억에 남을 것 같다.',
-    created_at: '2026-11-15T15:10:00.000Z',
-  },
-  {
-    diary_id: 4,
-    user_id: 1,
-    title: '오랜만에 만난 우리',
-    content:
-      '한강 공원을 천천히 걸으며 그동안 나누지 못했던 이야기를 오래도록 나누었다. 웃음이 끊이지 않던 오후.',
-    created_at: '2026-11-12T14:20:00.000Z',
-  },
-  {
-    diary_id: 3,
-    user_id: 1,
-    title: '비 오는 날의 작은 쉼표',
-    content:
-      '창문을 두드리는 빗소리를 배경 삼아 좋아하던 책을 펼쳤다. 바쁜 일상 속에서 잠시 숨을 고르는 소중한 시간.',
-    created_at: '2026-11-08T11:40:00.000Z',
-  },
-  {
-    diary_id: 2,
-    user_id: 1,
-    title: '갓 구운 빵의 온기',
-    content:
-      '아침 일찍 동네 빵집에서 갓 나온 식빵을 사 왔다. 고소한 냄새만으로도 하루가 든든하게 시작되는 기분이다.',
-    created_at: '2026-11-03T08:50:00.000Z',
-  },
-  {
-    diary_id: 1,
-    user_id: 1,
-    title: '눈이 내려 고요했던 아침',
-    content:
-      '밤새 소복이 쌓인 흰 눈 덕분에 세상이 한층 고요해졌다. 첫 발자국을 남기며 조용히 아침 산책을 나섰다.',
-    created_at: '2026-10-28T07:30:00.000Z',
-  },
-];
-
-// 카드 상단 감성 일러스트 커버 팔레트 (피그마 시안 톤 반영)
+// 카드 상단 감성 일러스트 커버 팔레트
 const CARD_COVERS = [
   {
     bg: 'from-[#E4C3A8] via-[#DFB79B] to-[#B78B74]',
     accent: '#7A543E',
-    scene: 'sunset',
   },
   {
     bg: 'from-[#DFD3C3] via-[#CBBBA6] to-[#A6927C]',
     accent: '#5E4B3B',
-    scene: 'alley',
   },
   {
     bg: 'from-[#E6D2B5] via-[#D6B88D] to-[#B38E5D]',
     accent: '#634826',
-    scene: 'cafe',
   },
   {
     bg: 'from-[#CBD3D9] via-[#B2BFC8] to-[#8A9AA6]',
     accent: '#3F4F5C',
-    scene: 'rain',
   },
   {
     bg: 'from-[#E8D5B7] via-[#D8BC94] to-[#B89464]',
     accent: '#664B28',
-    scene: 'bakery',
   },
   {
     bg: 'from-[#DCE1E5] via-[#C5CDD4] to-[#9DA8B3]',
     accent: '#46525E',
-    scene: 'snow',
   },
 ] as const;
 
@@ -132,39 +72,44 @@ function formatDotDate(dateString: string): string {
 }
 
 export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPageProps) {
-  const [user, setUser] = useState<UserProfile>({
-    user_id: 1,
-    account_id: 'fin_user',
-    username: 'FIN',
-  });
-  const [diaries, setDiaries] = useState<DiaryItem[]>(MOCK_DIARIES);
-  const [isLoading, setIsLoading] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [diaries, setDiaries] = useState<DiaryItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string>('');
 
   // 검색, 필터 탭, 정렬 상태 (기본값: 최신순 'latest')
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
 
-  // 일기 상세보기 모달 상태
+  // 일기 상세보기 및 수정 모달 상태
   const [selectedDiary, setSelectedDiary] = useState<DiaryItem | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // 사용자 정보 및 일기 목록 조회 (MEM-02: GET /api/diaries)
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
-        const parsed = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(JSON.parse(savedUser));
       } catch {
-        // 파싱 실패 시 기본값 유지
+        // 파싱 실패 시 무시
       }
     }
 
     const token = localStorage.getItem('accessToken');
-    if (!token) return;
+    if (!token) {
+      setIsLoading(false);
+      if (onLogout) onLogout();
+      return;
+    }
 
     const fetchDiaries = async () => {
       setIsLoading(true);
+      setFetchError('');
       try {
         const response = await fetch(`${API_BASE_URL}/diaries`, {
           headers: {
@@ -172,21 +117,35 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
             Authorization: `Bearer ${token}`,
           },
         });
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && Array.isArray(result.data)) {
-            setDiaries(result.data);
-          }
+
+        if (response.status === 401) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('user');
+          if (onLogout) onLogout();
+          return;
+        }
+
+        const result = await response.json();
+        if (response.ok && result.success && Array.isArray(result.data)) {
+          setDiaries(result.data);
+        } else {
+          setFetchError(
+            result?.error?.message || '일기 목록을 불러오지 못했습니다.'
+          );
         }
       } catch {
-        // 백엔드 서버 미실행 시 샘플 데이터 유지
+        setFetchError(
+          '서버(http://3.26.210.69:4000)에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.'
+        );
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchDiaries();
-  }, []);
+  }, [onLogout]);
+
+  const displayName = user?.username || user?.account_id || '사용자';
 
   // 최신순 정렬 + 검색어 + 기간 탭 필터링
   const visibleDiaries = useMemo(() => {
@@ -233,7 +192,59 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
       onNavigate(path);
       return;
     }
-    alert(`'${label}' 화면으로 이동합니다. (임시 연결 경로: ${path})`);
+    alert(`'${label}' 화면으로 이동합니다. (${path})`);
+  };
+
+  // 상세 모달 열기
+  const openDiaryModal = (diary: DiaryItem) => {
+    setSelectedDiary(diary);
+    setIsEditing(false);
+    setEditTitle(diary.title);
+    setEditContent(diary.content);
+  };
+
+  // 일기 수정 저장 (MEM-02: PUT /api/diaries/:diary_id)
+  const handleUpdateDiary = async () => {
+    if (!selectedDiary) return;
+    if (!editTitle.trim() || !editContent.trim()) {
+      alert('일기 제목과 본문을 모두 입력해 주세요.');
+      return;
+    }
+
+    const token = localStorage.getItem('accessToken');
+    if (!token) return;
+
+    setIsSavingEdit(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/diaries/${selectedDiary.diary_id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          content: editContent.trim(),
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        alert(result?.error?.message || '일기 수정 중 오류가 발생했습니다.');
+        return;
+      }
+
+      const updated: DiaryItem = result.data;
+      setDiaries((prev) =>
+        prev.map((d) => (d.diary_id === updated.diary_id ? updated : d))
+      );
+      setSelectedDiary(updated);
+      setIsEditing(false);
+    } catch {
+      alert('서버 연결 오류로 일기를 수정하지 못했습니다.');
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   // 일기 삭제 처리 (MEM-02: DELETE /api/diaries/:diary_id)
@@ -241,26 +252,36 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
     if (!window.confirm('이 일기를 정말 삭제하시겠습니까?')) return;
 
     const token = localStorage.getItem('accessToken');
-    if (token) {
-      try {
-        await fetch(`${API_BASE_URL}/diaries/${diaryId}`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      } catch {
-        // 오프라인/테스트 모드에서도 목록에서 제거
-      }
-    }
+    if (!token) return;
 
-    setDiaries((prev) => prev.filter((item) => item.diary_id !== diaryId));
-    setSelectedDiary(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/diaries/${diaryId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        alert(result?.error?.message || '일기 삭제 중 오류가 발생했습니다.');
+        return;
+      }
+
+      if (Array.isArray(result.data)) {
+        setDiaries(result.data);
+      } else {
+        setDiaries((prev) => prev.filter((item) => item.diary_id !== diaryId));
+      }
+      setSelectedDiary(null);
+    } catch {
+      alert('서버 연결 오류로 일기를 삭제하지 못했습니다.');
+    }
   };
 
   return (
     <div className="min-h-screen w-full bg-[#FAF6F0] text-[#2C221A] font-['Noto_Sans_KR',sans-serif]">
-      {/* 상단 고정 헤더 (메인페이지·일기쓰기와 동일한 구조) */}
+      {/* 상단 고정 헤더 */}
       <header className="sticky top-0 z-30 w-full bg-[#FAF6F0]/95 backdrop-blur-sm border-b border-[#E8E1D9]">
         <div className="max-w-[1040px] mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           {/* 왼쪽 로고 */}
@@ -342,15 +363,15 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
             <a
               href={TEMP_ROUTES.profile}
               onClick={(e) =>
-                handleNavigate(e, TEMP_ROUTES.profile, `${user.username}님 프로필 및 데드맨 스위치 설정`)
+                handleNavigate(e, TEMP_ROUTES.profile, `${displayName}님 프로필 및 데드맨 스위치 설정`)
               }
               className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-[#F2ECE3] hover:bg-[#E8DFD2] border border-[#E8E1D9] transition-colors"
             >
               <span className="w-6 h-6 rounded-full bg-[#9B7348] text-white text-[11px] font-bold flex items-center justify-center">
-                {(user.username || 'F').slice(0, 1).toUpperCase()}
+                {displayName.slice(0, 1).toUpperCase()}
               </span>
               <span className="text-xs font-semibold text-[#3E2D1E]">
-                {user.username || 'FIN'}님
+                {displayName}님
               </span>
             </a>
 
@@ -369,7 +390,13 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
 
       {/* 메인 콘텐츠 컨테이너 */}
       <main className="max-w-[1040px] mx-auto px-5 sm:px-8 py-9 sm:py-11">
-        {/* 상단 타이틀 & 오른쪽 '새 일기장 생성' 버튼 영역 */}
+        {fetchError && (
+          <div className="mb-6 p-3.5 rounded-2xl bg-[#FCEEEA] border border-[#F3D1C8] text-xs text-[#A84A3A] font-medium">
+            {fetchError}
+          </div>
+        )}
+
+        {/* 상단 타이틀 & 오른쪽 '새 일기 작성하기' 버튼 영역 */}
         <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-7">
           <div>
             <p className="text-[10px] font-semibold tracking-[0.14em] text-[#9B7348] uppercase mb-1.5">
@@ -383,7 +410,6 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
             </p>
           </div>
 
-          {/* 오른쪽 새 일기장 생성 버튼 */}
           <button
             type="button"
             onClick={(e) => handleNavigate(e, TEMP_ROUTES.diaryWrite, '새 일기장 작성하기')}
@@ -400,7 +426,6 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
         {/* 일기장 검색창 및 정렬 옵션 영역 */}
         <section className="mb-6">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4">
-            {/* 검색 입력창 */}
             <div className="relative flex-1">
               <svg
                 className="w-4 h-4 text-[#9E9286] absolute left-4 top-1/2 -translate-y-1/2"
@@ -431,7 +456,6 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
               )}
             </div>
 
-            {/* 정렬 선택 (기본값: 최신순) */}
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
@@ -458,7 +482,6 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
             </div>
           </div>
 
-          {/* 기간 탭 및 총 개수 안내 */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-b border-[#E8E1D9] pb-3">
             <div className="flex items-center gap-5 text-xs">
               {[
@@ -491,7 +514,7 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
           </div>
         </section>
 
-        {/* 저장된 일기장 최신순 카드 그리드 */}
+        {/* 저장된 일기장 카드 그리드 */}
         <section>
           {isLoading ? (
             <div className="w-full py-20 text-center text-xs text-[#8C7A68]">
@@ -522,14 +545,12 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
                 return (
                   <article
                     key={diary.diary_id}
-                    onClick={() => setSelectedDiary(diary)}
+                    onClick={() => openDiaryModal(diary)}
                     className="group bg-white hover:bg-[#FFFDF9] border border-[#E8E1D9] hover:border-[#C9B398] rounded-2xl overflow-hidden shadow-2xs hover:shadow-sm transition-all flex flex-col cursor-pointer"
                   >
-                    {/* 카드 상단 감성 커버 일러스트 영역 */}
                     <div
                       className={`relative h-44 w-full bg-gradient-to-br ${cover.bg} overflow-hidden flex items-end p-4`}
                     >
-                      {/* 은은한 배경 풍경 실루엣 */}
                       <svg
                         viewBox="0 0 320 160"
                         className="absolute inset-0 w-full h-full opacity-35 group-hover:scale-105 transition-transform duration-500"
@@ -555,7 +576,6 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
                       )}
                     </div>
 
-                    {/* 카드 하단 텍스트 정보 */}
                     <div className="p-5 flex-1 flex flex-col justify-between">
                       <div>
                         <div className="flex items-center justify-between text-[11px] text-[#9E9286] mb-2">
@@ -595,7 +615,7 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
         </section>
       </main>
 
-      {/* 일기 상세 조회 모달 (MEM-02) */}
+      {/* 일기 상세 조회 및 수정 모달 (MEM-02) */}
       {selectedDiary && (
         <div
           onClick={() => setSelectedDiary(null)}
@@ -619,13 +639,32 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
               </button>
             </div>
 
-            <h2 className="font-['Noto_Serif_KR',serif] text-2xl font-bold text-[#2C221A] pb-4 mb-5 border-b border-[#E8E1D9]">
-              {selectedDiary.title}
-            </h2>
+            {isEditing ? (
+              <div className="space-y-4 mb-6">
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full h-11 px-3.5 font-['Noto_Serif_KR',serif] text-lg font-bold bg-white border border-[#E8E1D9] rounded-xl text-[#2C221A] focus:outline-none focus:border-[#9B7348]"
+                />
+                <textarea
+                  rows={8}
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  className="w-full p-3.5 text-sm leading-7 bg-white border border-[#E8E1D9] rounded-xl text-[#3E2D1E] focus:outline-none focus:border-[#9B7348]"
+                />
+              </div>
+            ) : (
+              <>
+                <h2 className="font-['Noto_Serif_KR',serif] text-2xl font-bold text-[#2C221A] pb-4 mb-5 border-b border-[#E8E1D9]">
+                  {selectedDiary.title}
+                </h2>
 
-            <p className="text-sm text-[#3E2D1E] leading-8 whitespace-pre-wrap mb-8">
-              {selectedDiary.content}
-            </p>
+                <p className="text-sm text-[#3E2D1E] leading-8 whitespace-pre-wrap mb-8">
+                  {selectedDiary.content}
+                </p>
+              </>
+            )}
 
             <div className="flex items-center justify-between pt-4 border-t border-[#E8E1D9]">
               <button
@@ -636,13 +675,44 @@ export default function DiaryListPage({ onLogout, onNavigate }: DiaryListPagePro
                 일기 삭제
               </button>
 
-              <button
-                type="button"
-                onClick={() => setSelectedDiary(null)}
-                className="h-9.5 px-5 rounded-xl bg-[#9B7348] hover:bg-[#87623B] text-white text-xs font-semibold transition-colors cursor-pointer"
-              >
-                닫기
-              </button>
+              <div className="flex items-center gap-2">
+                {isEditing ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="h-9.5 px-4 rounded-xl bg-white border border-[#E8E1D9] text-xs font-semibold text-[#6E5D4F] cursor-pointer"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSavingEdit}
+                      onClick={handleUpdateDiary}
+                      className="h-9.5 px-5 rounded-xl bg-[#9B7348] hover:bg-[#87623B] disabled:opacity-60 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      {isSavingEdit ? '저장 중...' : '수정 완료'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="h-9.5 px-4 rounded-xl bg-white border border-[#E8E1D9] hover:border-[#9B7348] text-xs font-semibold text-[#5C4632] cursor-pointer"
+                    >
+                      수정
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDiary(null)}
+                      className="h-9.5 px-5 rounded-xl bg-[#9B7348] hover:bg-[#87623B] text-white text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      닫기
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

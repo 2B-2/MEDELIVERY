@@ -8,7 +8,7 @@ const ROUTES = {
   login: '/login',
 } as const;
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024; // 최대 5MB
 
 interface UserProfile {
@@ -18,6 +18,7 @@ interface UserProfile {
   email?: string;
   profile_image?: string | null;
   emergency_contact?: string;
+  inactivity_days?: number;
   notifications?: {
     email: boolean;
     sms: boolean;
@@ -39,14 +40,8 @@ function formatPhoneNumber(value: string): string {
 }
 
 export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPageProps) {
-  const [user, setUser] = useState<UserProfile>({
-    user_id: 1,
-    account_id: 'hong1234',
-    username: '홍길동',
-    email: 'hong@example.com',
-    profile_image: null,
-    emergency_contact: '010-1234-5678',
-  });
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState<boolean>(true);
 
   // 1. 프로필 사진 상태
   const [profileImage, setProfileImage] = useState<string | null>(null);
@@ -61,7 +56,7 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
   const [isSavingPassword, setIsSavingPassword] = useState(false);
 
   // 3. 수신자 번호 변경 및 인증 상태
-  const [currentRecipientPhone, setCurrentRecipientPhone] = useState('010-1234-5678');
+  const [currentRecipientPhone, setCurrentRecipientPhone] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [sentCode, setSentCode] = useState<string | null>(null);
@@ -76,15 +71,16 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
   // 5. 회원 탈퇴 확인 모달 및 전체 저장 상태
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [withdrawConfirmText, setWithdrawConfirmText] = useState('');
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [isSavingAll, setIsSavingAll] = useState(false);
 
-  // 기존 회원 정보 불러오기
+  // 기존 회원 정보 불러오기 (GET /api/auth/me)
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
         const parsed: UserProfile = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(parsed);
         if (parsed.profile_image) setProfileImage(parsed.profile_image);
         if (parsed.emergency_contact) setCurrentRecipientPhone(parsed.emergency_contact);
         if (parsed.notifications) {
@@ -93,10 +89,54 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
           setMemoryNotify(parsed.notifications.memory ?? true);
         }
       } catch {
-        // 파싱 실패 시 기본값 유지
+        // 파싱 실패 시 무시
       }
     }
-  }, []);
+
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      setIsLoadingProfile(false);
+      if (onLogout) onLogout();
+      return;
+    }
+
+    const fetchMe = async () => {
+      setIsLoadingProfile(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('user');
+          if (onLogout) onLogout();
+          return;
+        }
+
+        const result = await response.json();
+        if (response.ok && result.success && result.data) {
+          setUser((prev) => {
+            const merged = { ...(prev || {}), ...result.data };
+            localStorage.setItem('user', JSON.stringify(merged));
+            return merged;
+          });
+          if (result.data.emergency_contact !== undefined) {
+            setCurrentRecipientPhone(result.data.emergency_contact || '');
+          }
+        }
+      } catch {
+        // 네트워크 일시 오류 시 localStorage 캐시 유지
+      } finally {
+        setIsLoadingProfile(false);
+      }
+    };
+
+    fetchMe();
+  }, [onLogout]);
 
   // 인증번호 3분(180초) 카운트다운 타이머
   useEffect(() => {
@@ -142,7 +182,7 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
     setProfileImage(null);
   };
 
-  // [2] 비밀번호 저장
+  // [2] 비밀번호 저장 (PATCH /api/auth/password)
   const handleSavePassword = async () => {
     if (!currentPassword) {
       alert('현재 비밀번호를 입력해 주세요.');
@@ -158,38 +198,47 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
       return;
     }
 
-    setIsSavingPassword(true);
     const token = localStorage.getItem('accessToken');
+    if (!token) {
+      if (onLogout) onLogout();
+      return;
+    }
+
+    setIsSavingPassword(true);
     try {
-      if (token) {
-        const response = await fetch(`${API_BASE_URL}/auth/password`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            current_password: currentPassword,
-            new_password: newPassword,
-          }),
-        });
-        if (!response.ok) {
-          const err = await response.json().catch(() => null);
-          alert(err?.error?.message || '현재 비밀번호가 올바르지 않습니다.');
-          setIsSavingPassword(false);
-          return;
-        }
+      const response = await fetch(`${API_BASE_URL}/auth/password`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+
+      if (response.status === 401) {
+        const err = await response.json().catch(() => null);
+        alert(err?.error?.message || '현재 비밀번호가 올바르지 않거나 인증이 만료되었습니다.');
+        return;
       }
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        alert(result?.error?.message || '비밀번호 변경에 실패했습니다.');
+        return;
+      }
+
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      alert('비밀번호가 안전하게 변경되었습니다.');
     } catch {
-      // 백엔드 미연결 시에도 안내 표시
+      alert('서버(http://3.26.210.69:4000)에 연결할 수 없어 비밀번호를 변경하지 못했습니다.');
     } finally {
       setIsSavingPassword(false);
     }
-
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    alert('비밀번호가 안전하게 변경되었습니다.');
   };
 
   // [3] 수신자 번호 인증번호 발송 및 확인
@@ -204,7 +253,7 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
     setSentCode(generated);
     setRemainingSeconds(180);
     setIsPhoneVerified(false);
-    alert(`인증번호가 발송되었습니다.\n(테스트용 인증번호: ${generated})`);
+    alert(`인증번호가 발송되었습니다.\n(인증번호: ${generated})`);
   };
 
   const handleVerifyCode = () => {
@@ -226,7 +275,7 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
     alert('휴대폰 번호 인증이 완료되었습니다. 하단의 [변경사항 저장]을 누르면 적용됩니다.');
   };
 
-  // [5] 회원 탈퇴 실행
+  // [5] 회원 탈퇴 실행 (DELETE /api/auth/me)
   const handleConfirmWithdraw = async () => {
     if (withdrawConfirmText.trim() !== '탈퇴합니다') {
       alert("확인 문구로 '탈퇴합니다'를 정확히 입력해 주세요.");
@@ -234,76 +283,118 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
     }
 
     const token = localStorage.getItem('accessToken');
-    if (token) {
-      try {
-        await fetch(`${API_BASE_URL}/auth/me`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      } catch {
-        // 오프라인/테스트 모드에서도 로컬 데이터 초기화
-      }
+    if (!token) {
+      if (onLogout) onLogout();
+      return;
     }
 
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('user');
-    localStorage.removeItem('medelivery_diary_draft');
-    localStorage.removeItem('medelivery_local_capsules');
-    localStorage.removeItem('medelivery_autobiography_chapters');
+    setIsWithdrawing(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    setIsWithdrawModalOpen(false);
-    alert('회원 탈퇴가 완료되었습니다. 그동안 MEDELIVERY를 이용해 주셔서 감사합니다.');
+      const result = await response.json().catch(() => null);
+      if (!response.ok || (result && result.success === false)) {
+        alert(result?.error?.message || '회원 탈퇴 처리 중 오류가 발생했습니다.');
+        return;
+      }
 
-    if (onLogout) {
-      onLogout();
-    } else {
-      goToRoute(ROUTES.login);
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('user');
+      localStorage.removeItem('medelivery_diary_draft');
+
+      setIsWithdrawModalOpen(false);
+      alert('회원 탈퇴가 완료되었습니다. 그동안 MEDELIVERY를 이용해 주셔서 감사합니다.');
+
+      if (onLogout) {
+        onLogout();
+      } else {
+        goToRoute(ROUTES.login);
+      }
+    } catch {
+      alert('서버(http://3.26.210.69:4000)에 연결할 수 없어 회원 탈퇴를 처리하지 못했습니다.');
+    } finally {
+      setIsWithdrawing(false);
     }
   };
 
-  // [하단] 전체 변경사항 저장 -> 회원 페이지(/profile)로 이동
+  // [하단] 전체 변경사항 저장 (PATCH /api/auth/me)
   const handleSaveAllChanges = async () => {
-    setIsSavingAll(true);
-
-    const nextRecipientPhone = isPhoneVerified && newPhone ? newPhone : currentRecipientPhone;
-    const updatedUser: UserProfile = {
-      ...user,
-      profile_image: profileImage,
-      emergency_contact: nextRecipientPhone,
-      notifications: {
-        email: emailNotify,
-        sms: smsNotify,
-        memory: memoryNotify,
-      },
-    };
-
     const token = localStorage.getItem('accessToken');
-    if (token) {
-      try {
-        await fetch(`${API_BASE_URL}/auth/me`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            emergency_contact: nextRecipientPhone,
-          }),
-        });
-      } catch {
-        // 백엔드 미실행 시 로컬 스토리지 반영
-      }
+    if (!token) {
+      if (onLogout) onLogout();
+      return;
     }
 
-    localStorage.setItem('user', JSON.stringify(updatedUser));
-    setIsSavingAll(false);
-    alert('변경사항이 저장되었습니다.');
-    goToRoute(ROUTES.profile);
+    if (newPhone.trim() && !isPhoneVerified) {
+      alert('새 휴대폰 번호 인증을 먼저 완료해 주세요.');
+      return;
+    }
+
+    setIsSavingAll(true);
+    const nextRecipientPhone = isPhoneVerified && newPhone ? newPhone : currentRecipientPhone;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          emergency_contact: nextRecipientPhone,
+        }),
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('user');
+        if (onLogout) onLogout();
+        return;
+      }
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        alert(result?.error?.message || '변경사항 저장 중 오류가 발생했습니다.');
+        return;
+      }
+
+      const updatedUser: UserProfile = {
+        ...(user || { user_id: 0, account_id: '', username: '' }),
+        ...(result.data || {}),
+        profile_image: profileImage,
+        emergency_contact: result.data?.emergency_contact ?? nextRecipientPhone,
+        notifications: {
+          email: emailNotify,
+          sms: smsNotify,
+          memory: memoryNotify,
+        },
+      };
+
+      setUser(updatedUser);
+      setCurrentRecipientPhone(updatedUser.emergency_contact || '');
+      setNewPhone('');
+      setVerificationCode('');
+      setSentCode(null);
+      setIsPhoneVerified(false);
+
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      alert('변경사항이 저장되었습니다.');
+      goToRoute(ROUTES.profile);
+    } catch {
+      alert('서버(http://3.26.210.69:4000)에 연결할 수 없어 변경사항을 저장하지 못했습니다.');
+    } finally {
+      setIsSavingAll(false);
+    }
   };
 
-  const initialLetter = (user.username || user.account_id || 'F').trim().slice(0, 1).toUpperCase();
+  const displayName = user?.username || user?.account_id || '사용자';
+  const accountIdText = user?.account_id || '';
+  const initialLetter = displayName.trim().slice(0, 1).toUpperCase();
   const formattedTimer = `${Math.floor(remainingSeconds / 60)}:${String(
     remainingSeconds % 60
   ).padStart(2, '0')}`;
@@ -334,21 +425,16 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
 
           <button
             type="button"
-            onClick={() => goToRoute('/profile/edit')}
-            className="h-11 px-7 rounded-xl bg-[#9B7348] hover:bg-[#87623B] text-white text-xs sm:text-[13px] font-semibold flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+            onClick={() => goToRoute(ROUTES.main)}
+            className="h-10 px-5 rounded-xl bg-white hover:bg-[#F3ECE2] border border-[#E2D6C7] text-[#3E2D1E] text-xs font-semibold transition-colors cursor-pointer"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-            </svg>
-            회원 정보 수정
+            메인으로 돌아가기
           </button>
         </div>
       </header>
 
       {/* 메인 콘텐츠 컨테이너 */}
       <main className="max-w-[980px] mx-auto px-5 sm:px-8 py-10 sm:py-12">
-        {/* 페이지 타이틀 */}
         <section className="mb-8">
           <p className="text-[10px] font-bold tracking-[0.14em] text-[#9B7348] uppercase mb-1.5">
             MY STORY, MY ACCOUNT
@@ -361,409 +447,412 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
           </p>
         </section>
 
-        <div className="space-y-5">
-          {/* 1번째 칸: 회원 사진 변경 */}
-          <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
-            <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-center">
-              <div>
-                <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
-                </div>
-                <h2 className="text-sm font-bold text-[#2C221A] mb-1">프로필 사진</h2>
-                <p className="text-xs text-[#8C7A68] leading-relaxed">
-                  나의 이야기를 함께할 프로필 사진을 설정하세요.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-5">
-                {/* 원형 프로필 사진 또는 한 글자 아바타 */}
-                <div className="w-20 h-20 rounded-full overflow-hidden bg-[#9B7348] text-white font-['Noto_Serif_KR',serif] text-2xl font-bold flex items-center justify-center border-2 border-[#E5D7C4] shrink-0">
-                  {profileImage ? (
-                    <img
-                      src={profileImage}
-                      alt="회원 프로필 사진"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span>{initialLetter}</span>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-baseline gap-2 mb-2.5">
-                    <span className="text-sm font-bold text-[#2C221A]">{user.username}</span>
-                    <span className="text-xs text-[#9E9286]">{user.account_id}</span>
+        {isLoadingProfile ? (
+          <div className="w-full py-20 text-center text-xs text-[#8C7A68]">
+            회원 정보를 불러오는 중입니다...
+          </div>
+        ) : (
+          <>
+            <div className="space-y-5">
+              {/* 1번째 칸: 회원 사진 변경 */}
+              <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
+                <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-center">
+                  <div>
+                    <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                      </svg>
+                    </div>
+                    <h2 className="text-sm font-bold text-[#2C221A] mb-1">프로필 사진</h2>
+                    <p className="text-xs text-[#8C7A68] leading-relaxed">
+                      나의 이야기를 함께할 프로필 사진을 설정하세요.
+                    </p>
                   </div>
 
-                  <div className="flex items-center gap-2 mb-2">
-                    <label className="h-8.5 px-4 rounded-lg bg-[#9B7348] hover:bg-[#87623B] text-white text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer">
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={handlePhotoChange}
-                        className="hidden"
-                      />
-                      사진 변경
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={handlePhotoDelete}
-                      className="h-8.5 px-3.5 rounded-lg bg-white hover:bg-[#FAF6F0] border border-[#E2D6C7] text-xs font-semibold text-[#5C4632] transition-colors cursor-pointer"
-                    >
-                      삭제
-                    </button>
-                  </div>
-
-                  <p className="text-[11px] text-[#9E9286]">JPG, PNG 파일 (최대 5MB)</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* 2번째 칸: 비밀번호 변경 */}
-          <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
-            <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
-              <div>
-                <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                </div>
-                <h2 className="text-sm font-bold text-[#2C221A] mb-1">비밀번호 변경</h2>
-                <p className="text-xs text-[#8C7A68] leading-relaxed">
-                  소중한 기록을 안전하게 지키도록 비밀번호를 정기적으로 변경하세요.
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                {/* 현재 비밀번호 */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
-                    현재 비밀번호
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showCurrentPw ? 'text' : 'password'}
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      placeholder="현재 비밀번호를 입력하세요"
-                      className="w-full h-11 px-4 pr-11 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
-                    />
-                    <button
-                      type="button"
-                      aria-label="현재 비밀번호 표시 전환"
-                      onClick={() => setShowCurrentPw((prev) => !prev)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9E9286] hover:text-[#2C221A] text-xs cursor-pointer"
-                    >
-                      {showCurrentPw ? '숨김' : '보기'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 새 비밀번호 */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
-                    새 비밀번호
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showNewPw ? 'text' : 'password'}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="새 비밀번호를 입력하세요"
-                      className="w-full h-11 px-4 pr-11 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
-                    />
-                    <button
-                      type="button"
-                      aria-label="새 비밀번호 표시 전환"
-                      onClick={() => setShowNewPw((prev) => !prev)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9E9286] hover:text-[#2C221A] text-xs cursor-pointer"
-                    >
-                      {showNewPw ? '숨김' : '보기'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 새 비밀번호 확인 */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
-                    새 비밀번호 확인
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmPw ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="새 비밀번호를 한 번 더 입력하세요"
-                      className="w-full h-11 px-4 pr-11 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
-                    />
-                    <button
-                      type="button"
-                      aria-label="새 비밀번호 확인 표시 전환"
-                      onClick={() => setShowConfirmPw((prev) => !prev)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9E9286] hover:text-[#2C221A] text-xs cursor-pointer"
-                    >
-                      {showConfirmPw ? '숨김' : '보기'}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-[#9E9286] mt-1.5">
-                    영문, 숫자, 특수문자를 조합하여 8자 이상 입력해 주세요.
-                  </p>
-                </div>
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={handleSavePassword}
-                    disabled={isSavingPassword}
-                    className="h-9 px-4 rounded-xl bg-[#EFE7DC] hover:bg-[#E4D7C5] text-[#5C4632] text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    {isSavingPassword ? '변경 중...' : '비밀번호 저장'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* 3번째 칸: 수신자 전화번호 변경 */}
-          <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
-            <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
-              <div>
-                <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-                    <line x1="12" y1="18" x2="12.01" y2="18" />
-                  </svg>
-                </div>
-                <h2 className="text-sm font-bold text-[#2C221A] mb-1">수신자 번호 변경</h2>
-                <p className="text-xs text-[#8C7A68] leading-relaxed">
-                  추억을 전달받을 휴대폰 번호를 확인하고 변경하세요.
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                {/* 현재 등록된 수신자 번호 */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
-                    현재 등록된 수신자 번호
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={currentRecipientPhone}
-                      disabled
-                      className="w-full h-11 px-4 pr-10 text-xs sm:text-sm bg-[#F4EFE8] border border-[#E8E1D9] rounded-xl text-[#7D6E60] cursor-not-allowed"
-                    />
-                    <svg
-                      className="w-3.5 h-3.5 text-[#9E9286] absolute right-3.5 top-1/2 -translate-y-1/2"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </svg>
-                  </div>
-                </div>
-
-                {/* 새 휴대폰 번호 */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
-                    새 휴대폰 번호
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="tel"
-                      value={newPhone}
-                      onChange={(e) => {
-                        setNewPhone(formatPhoneNumber(e.target.value));
-                        setIsPhoneVerified(false);
-                      }}
-                      placeholder="010-0000-0000"
-                      className="flex-1 h-11 px-4 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSendVerification}
-                      className="h-11 px-4 rounded-xl bg-white hover:bg-[#FAF6F0] border border-[#DFD2C2] text-xs font-semibold text-[#5C4632] shrink-0 transition-colors cursor-pointer"
-                    >
-                      인증번호 발송
-                    </button>
-                  </div>
-                </div>
-
-                {/* 인증번호 입력 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-[#3E2D1E]">
-                      인증번호
-                    </label>
-                    {remainingSeconds > 0 && (
-                      <span className="text-[11px] font-bold text-[#9B7348]">
-                        남은 시간 {formattedTimer}
-                      </span>
-                    )}
-                    {isPhoneVerified && (
-                      <span className="text-[11px] font-bold text-emerald-700">
-                        ✓ 인증 완료
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      maxLength={6}
-                      value={verificationCode}
-                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
-                      placeholder="6자리 인증번호를 입력하세요"
-                      className="flex-1 h-11 px-4 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleVerifyCode}
-                      className="h-11 px-5 rounded-xl bg-white hover:bg-[#FAF6F0] border border-[#DFD2C2] text-xs font-semibold text-[#5C4632] shrink-0 transition-colors cursor-pointer"
-                    >
-                      인증하기
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-[#9E9286] mt-1.5">
-                    문자로 받은 인증번호를 3분 이내에 입력해 주세요.
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-[#FAF6F0] border border-[#EFE6D8] px-3.5 py-2.5 text-[11px] text-[#7D6E60]">
-                  ⓘ 번호 인증 후 &apos;변경사항 저장&apos;을 누르면 새 번호가 적용됩니다.
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* 4번째 칸: 알림 설정 */}
-          <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
-            <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
-              <div>
-                <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
-                </div>
-                <h2 className="text-sm font-bold text-[#2C221A] mb-1">알림 수신 설정</h2>
-                <p className="text-xs text-[#8C7A68] leading-relaxed">
-                  받고 싶은 소식만 선택해 나만의 속도로 기록을 이어가세요.
-                </p>
-              </div>
-
-              <div className="divide-y divide-[#F4EFE8]">
-                {[
-                  {
-                    id: 'email-notify',
-                    title: '이메일 알림 수신',
-                    desc: '기록과 계정 관련 알림을 이메일로 받아요.',
-                    checked: emailNotify,
-                    onToggle: () => setEmailNotify((prev) => !prev),
-                  },
-                  {
-                    id: 'sms-notify',
-                    title: 'SMS(문자) 알림 수신',
-                    desc: '타임캡슐 도착 등 중요한 알림을 문자로 받아요.',
-                    checked: smsNotify,
-                    onToggle: () => setSmsNotify((prev) => !prev),
-                  },
-                  {
-                    id: 'memory-notify',
-                    title: '추억 및 서비스 소식 알림 수신',
-                    desc: '다시 꺼내 볼 추억과 새로운 서비스 소식을 받아요.',
-                    checked: memoryNotify,
-                    onToggle: () => setMemoryNotify((prev) => !prev),
-                  },
-                ].map((item) => (
-                  <div
-                    key={item.id}
-                    className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-4"
-                  >
-                    <div>
-                      <p className="text-xs sm:text-[13px] font-bold text-[#2C221A]">
-                        {item.title}
-                      </p>
-                      <p className="text-[11px] text-[#8C7A68] mt-0.5">{item.desc}</p>
+                  <div className="flex flex-wrap items-center gap-5">
+                    <div className="w-20 h-20 rounded-full overflow-hidden bg-[#9B7348] text-white font-['Noto_Serif_KR',serif] text-2xl font-bold flex items-center justify-center border-2 border-[#E5D7C4] shrink-0">
+                      {profileImage ? (
+                        <img
+                          src={profileImage}
+                          alt="회원 프로필 사진"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span>{initialLetter}</span>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={item.checked}
-                      aria-label={item.title}
-                      onClick={item.onToggle}
-                      className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ${
-                        item.checked ? 'bg-[#9B7348]' : 'bg-[#DDD3C5]'
-                      }`}
-                    >
-                      <span
-                        className={`block w-5 h-5 rounded-full bg-white shadow-2xs transition-transform ${
-                          item.checked ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
+                    <div>
+                      <div className="flex items-baseline gap-2 mb-2.5">
+                        <span className="text-sm font-bold text-[#2C221A]">{displayName}</span>
+                        {accountIdText && (
+                          <span className="text-xs text-[#9E9286]">{accountIdText}</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 mb-2">
+                        <label className="h-8.5 px-4 rounded-lg bg-[#9B7348] hover:bg-[#87623B] text-white text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer">
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={handlePhotoChange}
+                            className="hidden"
+                          />
+                          사진 변경
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={handlePhotoDelete}
+                          className="h-8.5 px-3.5 rounded-lg bg-white hover:bg-[#FAF6F0] border border-[#E2D6C7] text-xs font-semibold text-[#5C4632] transition-colors cursor-pointer"
+                        >
+                          삭제
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-[#9E9286]">JPG, PNG 파일 (최대 5MB)</p>
+                    </div>
                   </div>
-                ))}
+                </div>
+              </section>
+
+              {/* 2번째 칸: 비밀번호 변경 */}
+              <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
+                <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
+                  <div>
+                    <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      </svg>
+                    </div>
+                    <h2 className="text-sm font-bold text-[#2C221A] mb-1">비밀번호 변경</h2>
+                    <p className="text-xs text-[#8C7A68] leading-relaxed">
+                      소중한 기록을 안전하게 지키도록 비밀번호를 정기적으로 변경하세요.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
+                        현재 비밀번호
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showCurrentPw ? 'text' : 'password'}
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          placeholder="현재 비밀번호를 입력하세요"
+                          className="w-full h-11 px-4 pr-11 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          aria-label="현재 비밀번호 표시 전환"
+                          onClick={() => setShowCurrentPw((prev) => !prev)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9E9286] hover:text-[#2C221A] text-xs cursor-pointer"
+                        >
+                          {showCurrentPw ? '숨김' : '보기'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
+                        새 비밀번호
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showNewPw ? 'text' : 'password'}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="새 비밀번호를 입력하세요"
+                          className="w-full h-11 px-4 pr-11 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          aria-label="새 비밀번호 표시 전환"
+                          onClick={() => setShowNewPw((prev) => !prev)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9E9286] hover:text-[#2C221A] text-xs cursor-pointer"
+                        >
+                          {showNewPw ? '숨김' : '보기'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
+                        새 비밀번호 확인
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showConfirmPw ? 'text' : 'password'}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="새 비밀번호를 한 번 더 입력하세요"
+                          className="w-full h-11 px-4 pr-11 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          aria-label="새 비밀번호 확인 표시 전환"
+                          onClick={() => setShowConfirmPw((prev) => !prev)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9E9286] hover:text-[#2C221A] text-xs cursor-pointer"
+                        >
+                          {showConfirmPw ? '숨김' : '보기'}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#9E9286] mt-1.5">
+                        영문, 숫자, 특수문자를 조합하여 8자 이상 입력해 주세요.
+                      </p>
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={handleSavePassword}
+                        disabled={isSavingPassword}
+                        className="h-9 px-4 rounded-xl bg-[#EFE7DC] hover:bg-[#E4D7C5] text-[#5C4632] text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        {isSavingPassword ? '변경 중...' : '비밀번호 저장'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* 3번째 칸: 수신자 전화번호 변경 */}
+              <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
+                <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
+                  <div>
+                    <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                        <line x1="12" y1="18" x2="12.01" y2="18" />
+                      </svg>
+                    </div>
+                    <h2 className="text-sm font-bold text-[#2C221A] mb-1">수신자 번호 변경</h2>
+                    <p className="text-xs text-[#8C7A68] leading-relaxed">
+                      추억을 전달받을 휴대폰 번호를 확인하고 변경하세요.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
+                        현재 등록된 수신자 번호
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={currentRecipientPhone || '등록된 번호 없음'}
+                          disabled
+                          className="w-full h-11 px-4 pr-10 text-xs sm:text-sm bg-[#F4EFE8] border border-[#E8E1D9] rounded-xl text-[#7D6E60] cursor-not-allowed"
+                        />
+                        <svg
+                          className="w-3.5 h-3.5 text-[#9E9286] absolute right-3.5 top-1/2 -translate-y-1/2"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3E2D1E] mb-1.5">
+                        새 휴대폰 번호
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="tel"
+                          value={newPhone}
+                          onChange={(e) => {
+                            setNewPhone(formatPhoneNumber(e.target.value));
+                            setIsPhoneVerified(false);
+                          }}
+                          placeholder="010-0000-0000"
+                          className="flex-1 h-11 px-4 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSendVerification}
+                          className="h-11 px-4 rounded-xl bg-white hover:bg-[#FAF6F0] border border-[#DFD2C2] text-xs font-semibold text-[#5C4632] shrink-0 transition-colors cursor-pointer"
+                        >
+                          인증번호 발송
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-semibold text-[#3E2D1E]">
+                          인증번호
+                        </label>
+                        {remainingSeconds > 0 && (
+                          <span className="text-[11px] font-bold text-[#9B7348]">
+                            남은 시간 {formattedTimer}
+                          </span>
+                        )}
+                        {isPhoneVerified && (
+                          <span className="text-[11px] font-bold text-emerald-700">
+                            ✓ 인증 완료
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={verificationCode}
+                          onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="6자리 인증번호를 입력하세요"
+                          className="flex-1 h-11 px-4 text-xs sm:text-sm bg-[#FAF6F0]/60 border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyCode}
+                          className="h-11 px-5 rounded-xl bg-white hover:bg-[#FAF6F0] border border-[#DFD2C2] text-xs font-semibold text-[#5C4632] shrink-0 transition-colors cursor-pointer"
+                        >
+                          인증하기
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#9E9286] mt-1.5">
+                        문자로 받은 인증번호를 3분 이내에 입력해 주세요.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-[#FAF6F0] border border-[#EFE6D8] px-3.5 py-2.5 text-[11px] text-[#7D6E60]">
+                      ⓘ 번호 인증 후 &apos;변경사항 저장&apos;을 누르면 새 번호가 적용됩니다.
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* 4번째 칸: 알림 설정 */}
+              <section className="bg-white border border-[#E8E1D9] rounded-2xl p-6 sm:p-8 shadow-2xs">
+                <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
+                  <div>
+                    <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#EFE6D8] flex items-center justify-center text-[#9B7348] mb-3">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                      </svg>
+                    </div>
+                    <h2 className="text-sm font-bold text-[#2C221A] mb-1">알림 수신 설정</h2>
+                    <p className="text-xs text-[#8C7A68] leading-relaxed">
+                      받고 싶은 소식만 선택해 나만의 속도로 기록을 이어가세요.
+                    </p>
+                  </div>
+
+                  <div className="divide-y divide-[#F4EFE8]">
+                    {[
+                      {
+                        id: 'email-notify',
+                        title: '이메일 알림 수신',
+                        desc: '기록과 계정 관련 알림을 이메일로 받아요.',
+                        checked: emailNotify,
+                        onToggle: () => setEmailNotify((prev) => !prev),
+                      },
+                      {
+                        id: 'sms-notify',
+                        title: 'SMS(문자) 알림 수신',
+                        desc: '타임캡슐 도착 등 중요한 알림을 문자로 받아요.',
+                        checked: smsNotify,
+                        onToggle: () => setSmsNotify((prev) => !prev),
+                      },
+                      {
+                        id: 'memory-notify',
+                        title: '추억 및 서비스 소식 알림 수신',
+                        desc: '다시 꺼내 볼 추억과 새로운 서비스 소식을 받아요.',
+                        checked: memoryNotify,
+                        onToggle: () => setMemoryNotify((prev) => !prev),
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.id}
+                        className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-4"
+                      >
+                        <div>
+                          <p className="text-xs sm:text-[13px] font-bold text-[#2C221A]">
+                            {item.title}
+                          </p>
+                          <p className="text-[11px] text-[#8C7A68] mt-0.5">{item.desc}</p>
+                        </div>
+
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={item.checked}
+                          aria-label={item.title}
+                          onClick={item.onToggle}
+                          className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ${
+                            item.checked ? 'bg-[#9B7348]' : 'bg-[#DDD3C5]'
+                          }`}
+                        >
+                          <span
+                            className={`block w-5 h-5 rounded-full bg-white shadow-2xs transition-transform ${
+                              item.checked ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              {/* 5번째(마지막) 칸: 회원 탈퇴 */}
+              <section className="bg-[#FDF8F6] border border-[#EED9D3] rounded-2xl p-6 sm:px-8 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs sm:text-[13px] font-bold text-[#A84A3A] mb-1">
+                    <span>⚠</span>
+                    <h2>회원 탈퇴</h2>
+                  </div>
+                  <p className="text-xs text-[#8C6D66]">
+                    탈퇴 시 작성하신 일기, 타임캡슐, 자서전 데이터가 모두 삭제되며 복구할 수 없습니다.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWithdrawConfirmText('');
+                    setIsWithdrawModalOpen(true);
+                  }}
+                  className="self-start sm:self-auto h-9.5 px-4 rounded-xl bg-white hover:bg-[#FCEEEA] border border-[#E5BFB6] text-xs font-semibold text-[#A84A3A] transition-colors cursor-pointer shrink-0"
+                >
+                  회원 탈퇴하기
+                </button>
+              </section>
+            </div>
+
+            {/* 맨 밑: 저장 칸과 취소 칸 */}
+            <div className="mt-8 pt-6 border-t border-[#E8E1D9] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <p className="text-xs text-[#8C7A68]">변경된 설정은 저장 후 적용됩니다.</p>
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleSaveAllChanges}
+                  disabled={isSavingAll}
+                  className="h-10.5 px-6 rounded-xl bg-[#9B7348] hover:bg-[#87623B] disabled:opacity-60 text-white text-xs sm:text-[13px] font-semibold shadow-xs transition-colors cursor-pointer"
+                >
+                  {isSavingAll ? '저장 중...' : '변경사항 저장'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => goToRoute(ROUTES.main)}
+                  className="h-10.5 px-5 rounded-xl bg-white hover:bg-[#F3ECE2] border border-[#E2D6C7] text-xs sm:text-[13px] font-semibold text-[#5C4632] transition-colors cursor-pointer"
+                >
+                  취소
+                </button>
               </div>
             </div>
-          </section>
-
-          {/* 5번째(마지막) 칸: 회원 탈퇴 */}
-          <section className="bg-[#FDF8F6] border border-[#EED9D3] rounded-2xl p-6 sm:px-8 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-1.5 text-xs sm:text-[13px] font-bold text-[#A84A3A] mb-1">
-                <span>⚠</span>
-                <h2>회원 탈퇴</h2>
-              </div>
-              <p className="text-xs text-[#8C6D66]">
-                탈퇴 시 작성하신 일기, 타임캡슐, 자서전 데이터가 모두 삭제되며 복구할 수 없습니다.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setWithdrawConfirmText('');
-                setIsWithdrawModalOpen(true);
-              }}
-              className="self-start sm:self-auto h-9.5 px-4 rounded-xl bg-white hover:bg-[#FCEEEA] border border-[#E5BFB6] text-xs font-semibold text-[#A84A3A] transition-colors cursor-pointer shrink-0"
-            >
-              회원 탈퇴하기
-            </button>
-          </section>
-        </div>
-
-        {/* 맨 밑: 저장 칸과 취소 칸 */}
-        <div className="mt-8 pt-6 border-t border-[#E8E1D9] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <p className="text-xs text-[#8C7A68]">변경된 설정은 저장 후 적용됩니다.</p>
-
-          <div className="flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={handleSaveAllChanges}
-              disabled={isSavingAll}
-              className="h-10.5 px-6 rounded-xl bg-[#9B7348] hover:bg-[#87623B] disabled:opacity-60 text-white text-xs sm:text-[13px] font-semibold shadow-xs transition-colors cursor-pointer"
-            >
-              {isSavingAll ? '저장 중...' : '변경사항 저장'}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => goToRoute(ROUTES.profile)}
-              className="h-10.5 px-5 rounded-xl bg-white hover:bg-[#F3ECE2] border border-[#E2D6C7] text-xs sm:text-[13px] font-semibold text-[#5C4632] transition-colors cursor-pointer"
-            >
-              취소
-            </button>
-          </div>
-        </div>
+          </>
+        )}
       </main>
 
       {/* 회원 탈퇴 최종 확인 모달 */}
@@ -804,10 +893,11 @@ export default function ProfileEditPage({ onLogout, onNavigate }: ProfileEditPag
               </button>
               <button
                 type="button"
+                disabled={isWithdrawing}
                 onClick={handleConfirmWithdraw}
-                className="h-9.5 px-5 rounded-xl bg-[#A84A3A] hover:bg-[#8F3B2D] text-white text-xs font-semibold cursor-pointer"
+                className="h-9.5 px-5 rounded-xl bg-[#A84A3A] hover:bg-[#8F3B2D] disabled:opacity-60 text-white text-xs font-semibold cursor-pointer"
               >
-                탈퇴 확정
+                {isWithdrawing ? '처리 중...' : '탈퇴 확정'}
               </button>
             </div>
           </div>

@@ -6,60 +6,59 @@ interface LoginPageProps {
   onLoginSuccess: () => void;
 }
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
 
   const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setErrorMessage('');
+
+    const trimmedId = userId.trim();
+    if (!trimmedId || !password) {
+      setErrorMessage('아이디와 비밀번호를 모두 입력해 주세요.');
+      return;
+    }
+
     setIsLoading(true);
 
-    const displayName = userId.trim() || 'FIN';
-
     try {
-      // MEDELIVERY API v2.0 [ACC-01] 로그인 요청
+      // MEDELIVERY API v2.0 [ACC-01] 실제 로그인 요청
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          account_id: displayName,
-          userId: displayName,
-          password: password || '1234',
+          account_id: trimmedId,
+          password,
         }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.accessToken) {
-          localStorage.setItem('accessToken', result.accessToken);
-          localStorage.setItem('user', JSON.stringify(result.data));
-          onLoginSuccess();
-          return;
-        }
+      const result = await response.json();
+
+      if (response.ok && result.success && result.accessToken) {
+        localStorage.setItem('accessToken', result.accessToken);
+        localStorage.setItem('user', JSON.stringify(result.data));
+        onLoginSuccess();
+        return;
       }
+
+      setErrorMessage(
+        result?.error?.message ||
+          result?.message ||
+          '아이디 또는 비밀번호가 올바르지 않습니다.'
+      );
     } catch {
-      // 백엔드 서버가 꺼져 있는 경우 아래 임시 로그인 처리로 진행
+      setErrorMessage(
+        '서버(http://3.26.210.69:4000)에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.'
+      );
     } finally {
       setIsLoading(false);
     }
-
-    // 현재 프론트엔드 화면 확인용 즉시 로그인 처리
-    localStorage.setItem(
-      'user',
-      JSON.stringify({
-        user_id: 1,
-        account_id: displayName,
-        username: displayName,
-        emergency_contact: '010-1234-5678',
-        inactivity_days: 90,
-        last_active_at: new Date().toISOString(),
-      })
-    );
-    onLoginSuccess();
   };
 
   return (
@@ -123,7 +122,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 type="text"
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
-                placeholder="아이디를 입력하세요 (미입력 시 FIN으로 접속)"
+                placeholder="아이디를 입력하세요"
                 className="w-full h-11 px-3.5 text-sm bg-[#FAF6F0] border border-[#E8E1D9] rounded-xl text-[#2C221A] placeholder:text-[#B5AAA0] focus:outline-none focus:border-[#9B7348] focus:bg-white transition-colors"
               />
             </div>
@@ -145,12 +144,18 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
               />
             </div>
 
+            {errorMessage && (
+              <div className="p-3 rounded-xl bg-[#FCEEEA] border border-[#F3D1C8] text-xs text-[#A84A3A] font-medium">
+                {errorMessage}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={isLoading}
               className="w-full h-11 mt-2 rounded-xl bg-[#9B7348] hover:bg-[#87623B] disabled:opacity-60 text-white text-sm font-semibold shadow-xs transition-colors cursor-pointer"
             >
-              {isLoading ? '로그인 중...' : '로그인'}
+              {isLoading ? '서버 인증 중...' : '로그인'}
             </button>
           </form>
 

@@ -24,10 +24,11 @@ const IMPLEMENTED_ROUTES: string[] = [
   ROUTES.diaries,
   ROUTES.timeCapsules,
   ROUTES.timeCapsuleWrite,
+  ROUTES.interviews,
+  ROUTES.profile,
 ];
 
-const API_BASE_URL = 'http://localhost:4000/api';
-const LOCAL_CAPSULES_KEY = 'medelivery_local_capsules';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 
 interface UserProfile {
   user_id: number;
@@ -75,13 +76,9 @@ export default function TimeCapsuleWritePage({
   onLogout,
   onNavigate,
 }: TimeCapsuleWritePageProps) {
-  const [user, setUser] = useState<UserProfile>({
-    user_id: 1,
-    account_id: 'fin_user',
-    username: 'FIN',
-  });
+  const [user, setUser] = useState<UserProfile | null>(null);
 
-  // 타임캡슐 입력 상태 (API v2.0 CAP-01: title, message, open_date)
+  // 타임캡슐 입력 상태 (schema_2.sql time_capsules: title, message, open_date)
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [openDate, setOpenDate] = useState<string>(() => getDefaultOpenDateString());
@@ -97,13 +94,19 @@ export default function TimeCapsuleWritePage({
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
-        const parsed = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(JSON.parse(savedUser));
       } catch {
-        // 파싱 실패 시 기본값 유지
+        // 파싱 실패 시 무시
       }
     }
-  }, []);
+
+    const token = localStorage.getItem('accessToken');
+    if (!token && onLogout) {
+      onLogout();
+    }
+  }, [onLogout]);
+
+  const displayName = user?.username || user?.account_id || '사용자';
 
   // 오늘로부터 개봉 지정일까지 남은 일수 계산
   const remainingDays = useMemo(() => {
@@ -124,7 +127,7 @@ export default function TimeCapsuleWritePage({
       return;
     }
     if (label) {
-      alert(`'${label}' 화면으로 이동합니다. (임시 연결 경로: ${path})`);
+      alert(`'${label}' 화면으로 이동합니다. (${path})`);
     }
   };
 
@@ -199,64 +202,52 @@ export default function TimeCapsuleWritePage({
       return;
     }
 
-    setIsSealing(true);
     const token = localStorage.getItem('accessToken');
+    if (!token) {
+      alert('로그인이 필요합니다.');
+      if (onLogout) onLogout();
+      return;
+    }
+
+    setIsSealing(true);
     const isoOpenDate = new Date(`${openDate}T00:00:00.000Z`).toISOString();
 
     try {
-      if (token) {
-        const response = await fetch(`${API_BASE_URL}/time-capsules`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            title: title.trim(),
-            message: message.trim(),
-            open_date: isoOpenDate,
-          }),
-        });
+      const response = await fetch(`${API_BASE_URL}/time-capsules`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          message: message.trim(),
+          open_date: isoOpenDate,
+        }),
+      });
 
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success) {
-            alert(`"${title.trim()}" 타임캡슐이 봉인되었습니다.\n${formatKoreanDateText(openDate)}에 열립니다.`);
-            goToRoute(ROUTES.timeCapsules);
-            return;
-          }
-        }
+      if (response.status === 401) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('user');
+        if (onLogout) onLogout();
+        return;
       }
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        alert(result?.error?.message || '타임캡슐 봉인 중 오류가 발생했습니다.');
+        return;
+      }
+
+      alert(
+        `"${title.trim()}" 타임캡슐이 안전하게 봉인되었습니다.\n${formatKoreanDateText(openDate)}에 열립니다.`
+      );
+      goToRoute(ROUTES.timeCapsules);
     } catch {
-      // 백엔드 미연결 시 로컬 스토리지 저장 후 전체보기로 이동
+      alert('서버(http://3.26.210.69:4000)에 연결할 수 없어 타임캡슐을 봉인하지 못했습니다.');
     } finally {
       setIsSealing(false);
     }
-
-    // 백엔드 미실행 상태에서도 TimeCapsuleListPage에서 새 캡슐이 바로 보이도록 로컬에 저장
-    try {
-      const existingRaw = localStorage.getItem(LOCAL_CAPSULES_KEY);
-      const existingList = existingRaw ? JSON.parse(existingRaw) : [];
-      const newCapsule = {
-        capsule_id: Date.now(),
-        user_id: user.user_id,
-        title: title.trim(),
-        message: message.trim(),
-        open_date: isoOpenDate,
-        is_opened: false,
-      };
-      localStorage.setItem(
-        LOCAL_CAPSULES_KEY,
-        JSON.stringify([newCapsule, ...(Array.isArray(existingList) ? existingList : [])])
-      );
-    } catch {
-      // 스토리지 저장 오류 무시
-    }
-
-    alert(
-      `"${title.trim()}" 타임캡슐이 안전하게 봉인되었습니다.\n(${formatKoreanDateText(openDate)}까지 봉인)`
-    );
-    goToRoute(ROUTES.timeCapsules);
   };
 
   return (
@@ -332,20 +323,20 @@ export default function TimeCapsuleWritePage({
             </a>
           </nav>
 
-         {/* 오른쪽 사용자 프로필 영역 */}
+          {/* 오른쪽 사용자 프로필 영역 */}
           <div className="flex items-center gap-2.5">
             <a
               href={ROUTES.profile}
               onClick={(e) =>
-                handleHeaderLink(e, ROUTES.profile, `${user.username}님 프로필 및 데드맨 스위치 설정`)
+                handleHeaderLink(e, ROUTES.profile, `${displayName}님 프로필 및 데드맨 스위치 설정`)
               }
               className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-[#F2ECE3] hover:bg-[#E8DFD2] border border-[#E8E1D9] transition-colors"
             >
               <span className="w-6 h-6 rounded-full bg-[#9B7348] text-white text-[11px] font-bold flex items-center justify-center">
-                {(user.username || 'F').slice(0, 1).toUpperCase()}
+                {displayName.slice(0, 1).toUpperCase()}
               </span>
               <span className="text-xs font-semibold text-[#3E2D1E]">
-                {user.username || 'FIN'}님
+                {displayName}님
               </span>
             </a>
 
@@ -364,7 +355,7 @@ export default function TimeCapsuleWritePage({
 
       {/* 메인 콘텐츠 컨테이너 */}
       <main className="max-w-[920px] mx-auto px-5 sm:px-8 py-9 sm:py-12">
-        {/* 상단 타이틀 영역 (새 캡슐 만들기 버튼 및 기다리고 있는 캡슐 섹션 제거) */}
+        {/* 상단 타이틀 영역 */}
         <section className="mb-8">
           <div className="flex items-center justify-between mb-2">
             <p className="text-[10px] font-bold tracking-[0.14em] text-[#9B7348] uppercase">
@@ -386,7 +377,7 @@ export default function TimeCapsuleWritePage({
           </p>
         </section>
 
-        {/* 타임캡슐 작성 및 봉인 카드 ('A LETTER TO THE FUTURE · 미래의 나에게') */}
+        {/* 타임캡슐 작성 및 봉인 카드 */}
         <section className="bg-white border border-[#E8E1D9] rounded-[28px] p-6 sm:p-11 shadow-2xs">
           {/* 카드 상단 아이콘 & 타이틀 */}
           <div className="flex items-center gap-3.5 pb-6 mb-7 border-b border-[#F2ECE3]">
@@ -419,6 +410,7 @@ export default function TimeCapsuleWritePage({
               <input
                 id="capsule-title"
                 type="text"
+                maxLength={200}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="기억하고 싶은 순간의 이름"

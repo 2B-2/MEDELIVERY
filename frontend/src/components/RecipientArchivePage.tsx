@@ -30,9 +30,7 @@ const IMPLEMENTED_ROUTES: string[] = [
   ROUTES.recipientArchive,
 ];
 
-const API_BASE_URL = 'http://localhost:4000/api';
-const LOCAL_CAPSULES_KEY = 'medelivery_local_capsules';
-const LOCAL_AUTOBIOGRAPHY_KEY = 'medelivery_autobiography_chapters';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 
 // 수신자 보안 열람용 정해진 6자리 초대 코드
 const VALID_INVITE_CODE = '123456';
@@ -45,6 +43,39 @@ interface UserProfile {
   username: string;
 }
 
+interface DiaryApiItem {
+  diary_id: number;
+  title: string;
+  content: string;
+  created_at: string;
+}
+
+interface TimeCapsuleApiItem {
+  capsule_id: number;
+  title: string;
+  message?: string;
+  open_date: string;
+  is_opened?: boolean;
+}
+
+interface InterviewApiItem {
+  interview_id: number;
+  chapter_name: string;
+  created_at?: string;
+}
+
+interface InterviewQuestionApiItem {
+  question_id: number;
+  interview_id: number;
+  question_answer: string;
+}
+
+interface LastDiaryView {
+  title: string;
+  dateText: string;
+  paragraphs: string[];
+}
+
 interface SharedRecordItem {
   id: string;
   category: Exclude<RecordCategory, 'all'>;
@@ -55,6 +86,7 @@ interface SharedRecordItem {
   dateText: string;
   metaText: string;
   actionLabel: string;
+  timestamp: number;
 }
 
 interface RecipientArchivePageProps {
@@ -62,96 +94,8 @@ interface RecipientArchivePageProps {
   onNavigate?: (path: string) => void;
 }
 
-// 마지막으로 작성한 일기 기본 데이터
-const DEFAULT_LAST_DIARY = {
-  title: '사랑하는 너에게, 평범한 날의 마음을',
-  dateText: '2026. 11. 18.',
-  paragraphs: [
-    '사랑하는 너에게.',
-    '이 기록을 읽는 날, 네 곁에 따뜻한 차 한 잔이 놓여 있으면 좋겠구나.',
-    '함께 걷던 길과 저녁 식탁에서 나눈 작은 이야기들이 내게는 참 큰 행복이었어.',
-    '내가 남긴 기록이 그리운 날에는 작은 위로가, 새로운 날에는 다정한 응원이 되기를.',
-    '네가 살아갈 모든 계절을 진심으로 응원해.',
-  ],
-};
-
-// 수신자에게 전달된 전체 기록 샘플 데이터 (일기, 타임캡슐, 자서전)
-const INITIAL_SHARED_RECORDS: SharedRecordItem[] = [
-  {
-    id: 'diary-1',
-    category: 'diary',
-    categoryLabel: '일기',
-    title: '겨울 끝의 포근한 저녁',
-    subtitle: '노을이 오래 머물던 어느 날의 기록',
-    content:
-      '오늘은 유난히 노을이 오래 머물렀다. 집으로 돌아오는 길, 붉게 물든 하늘을 한참 올려다보았다. 차가운 바람 사이로 아주 조금 봄 냄새가 나는 것 같았다. 별일 없던 하루였지만 이 순간만큼은 오래 기억하고 싶다.',
-    dateText: '2026. 11. 18.',
-    metaText: '일기 기록',
-    actionLabel: '일기 읽기',
-  },
-  {
-    id: 'diary-2',
-    category: 'diary',
-    categoryLabel: '일기',
-    title: '엄마와 걷던 길',
-    subtitle: '오랜만에 천천히 동네를 걸었던 오후',
-    content:
-      '오래된 골목길을 나란히 걸으며 어린 시절 이야기를 나누었다. 평범한 발걸음이 오래도록 기억에 남을 것 같다. 소소한 대화들이 마음을 가장 따뜻하게 채워준다.',
-    dateText: '2026. 11. 15.',
-    metaText: '일기 기록',
-    actionLabel: '일기 읽기',
-  },
-  {
-    id: 'capsule-1',
-    category: 'capsule',
-    categoryLabel: '타임캡슐',
-    title: '스물다섯 번째 생일에',
-    subtitle: '너의 새로운 시작에 전하고 싶은 말',
-    content:
-      '스물다섯 번째 생일을 진심으로 축하해. 어떤 선택을 하든, 어떤 길을 걷든 너는 이미 충분히 잘해내고 있어. 두려워하지 말고 네 마음이 가리키는 방향으로 당당히 나아가길 바란다.',
-    dateText: '2026. 10. 20.',
-    metaText: '편지 1통 봉인 해제',
-    actionLabel: '타임캡슐 읽기',
-  },
-  {
-    id: 'capsule-2',
-    category: 'capsule',
-    categoryLabel: '타임캡슐',
-    title: '다시 만나는 겨울',
-    subtitle: '기다리던 마음이 도착했어요',
-    content:
-      '작년의 겨울은 생각보다 차가웠지만, 그 시간을 지나온 지금의 너는 조금 더 단단해졌을 거야. 오늘의 다짐을 잊지 말고 한 걸음씩 천천히 걸어가자.',
-    dateText: '2026. 02. 20.',
-    metaText: '편지 1통 봉인 해제',
-    actionLabel: '타임캡슐 읽기',
-  },
-  {
-    id: 'auto-1',
-    category: 'autobiography',
-    categoryLabel: '자서전',
-    title: '나의 작고 소중한 날들',
-    subtitle: '어린 시절부터 가족과 함께한 시간까지',
-    content:
-      '처음으로 온전히 나만의 방을 갖게 된 날을 기억한다. 낯선 도시의 작은 창문으로 오후 햇살이 길게 들어왔다. 두려움보다 설렘이 컸던 시절, 함께 걸어준 가족과 친구들 덕분에 매일이 빛났다.',
-    dateText: '2026. 02. 15.',
-    metaText: '10대~20대 · 13개 이야기',
-    actionLabel: '자서전 읽기',
-  },
-  {
-    id: 'auto-2',
-    category: 'autobiography',
-    categoryLabel: '자서전',
-    title: '단단하게 뿌리내린 계절',
-    subtitle: '나답게 살아가는 법을 배운 시간',
-    content:
-      '세상의 속도보다 나의 호흡을 먼저 살피는 법을 배웠다. 소중한 사람들과 식탁을 마주하는 평범한 저녁이 얼마나 큰 선물인지 깨달았던, 인생의 가장 깊고 온화한 계절이었다.',
-    dateText: '2026. 05. 10.',
-    metaText: '30대~40대 · 9개 이야기',
-    actionLabel: '자서전 읽기',
-  },
-];
-
-function formatDotDate(dateString: string): string {
+function formatDotDate(dateString?: string): string {
+  if (!dateString) return '';
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return dateString;
   const yyyy = date.getFullYear();
@@ -164,26 +108,24 @@ export default function RecipientArchivePage({
   onLogout,
   onNavigate,
 }: RecipientArchivePageProps) {
-  const [user, setUser] = useState<UserProfile>({
-    user_id: 1,
-    account_id: 'fin_user',
-    username: 'FIN',
-  });
+  const [user, setUser] = useState<UserProfile | null>(null);
 
-  // 보안 초대 코드 인증 상태 (초기 진입 시 false -> 초대 코드 입력 모달 먼저 표시)
+  // 보안 초대 코드 인증 상태
   const [isCodeVerified, setIsCodeVerified] = useState<boolean>(false);
   const [codeDigits, setCodeDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [isCodeErrorModalOpen, setIsCodeErrorModalOpen] = useState<boolean>(false);
   const codeInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   // 중간 카드: 마지막으로 작성한 일기
-  const [lastDiary, setLastDiary] = useState(DEFAULT_LAST_DIARY);
+  const [lastDiary, setLastDiary] = useState<LastDiaryView | null>(null);
   const [isLastDiaryModalOpen, setIsLastDiaryModalOpen] = useState(false);
 
-  // 당신에게 남긴 기록 리스트 및 카테고리 탭 상태 ('all' | 'diary' | 'capsule' | 'autobiography')
-  const [records, setRecords] = useState<SharedRecordItem[]>(INITIAL_SHARED_RECORDS);
+  // 당신에게 남긴 기록 리스트 및 카테고리 탭 상태
+  const [records, setRecords] = useState<SharedRecordItem[]>([]);
   const [activeCategory, setActiveCategory] = useState<RecordCategory>('all');
   const [selectedRecord, setSelectedRecord] = useState<SharedRecordItem | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [fetchError, setFetchError] = useState<string>('');
 
   // 진입 시 첫 번째 초대 코드 입력 칸에 자동 포커스
   useEffect(() => {
@@ -195,109 +137,189 @@ export default function RecipientArchivePage({
     }
   }, [isCodeVerified]);
 
-  // 사용자 정보 및 작성된 일기·타임캡슐·자서전 불러오기
+  // 로그인 사용자 정보 로드
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
-        const parsed = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(JSON.parse(savedUser));
       } catch {
-        // 파싱 실패 시 기본값 유지
+        // 파싱 실패 시 무시
       }
     }
+  }, []);
 
-    try {
-      const extraRecords: SharedRecordItem[] = [];
-
-      const localCapsulesRaw = localStorage.getItem(LOCAL_CAPSULES_KEY);
-      if (localCapsulesRaw) {
-        const localCapsules = JSON.parse(localCapsulesRaw);
-        if (Array.isArray(localCapsules)) {
-          localCapsules.forEach((cap) => {
-            extraRecords.push({
-              id: `local-cap-${cap.capsule_id}`,
-              category: 'capsule',
-              categoryLabel: '타임캡슐',
-              title: cap.title,
-              subtitle: '미래로 보낸 마음의 편지',
-              content: cap.message || '소중한 마음을 담아 봉인한 타임캡슐입니다.',
-              dateText: formatDotDate(cap.open_date),
-              metaText: '타임캡슐 전달 완료',
-              actionLabel: '타임캡슐 읽기',
-            });
-          });
-        }
-      }
-
-      const localBioRaw = localStorage.getItem(LOCAL_AUTOBIOGRAPHY_KEY);
-      if (localBioRaw) {
-        const chapters = JSON.parse(localBioRaw);
-        if (Array.isArray(chapters)) {
-          chapters.forEach((chap) => {
-            const firstSpread = chap.spreads?.[0];
-            if (firstSpread) {
-              extraRecords.push({
-                id: `local-auto-${chap.interview_id}`,
-                category: 'autobiography',
-                categoryLabel: '자서전',
-                title: chap.title,
-                subtitle: chap.subtitle || chap.era,
-                content: [
-                  ...(firstSpread.leftParagraphs || []),
-                  ...(firstSpread.rightParagraphs || []),
-                ].join('\n\n'),
-                dateText: '2026. 11. 18.',
-                metaText: `${chap.era} 자서전`,
-                actionLabel: '자서전 읽기',
-              });
-            }
-          });
-        }
-      }
-
-      if (extraRecords.length > 0) {
-        setRecords([...extraRecords, ...INITIAL_SHARED_RECORDS]);
-      }
-    } catch {
-      // 로컬 데이터 파싱 실패 시 기본 목록 유지
-    }
+  // 보안 초대 코드 인증 완료 후 백엔드 실제 데이터(일기, 타임캡슐, 자서전) 조회
+  useEffect(() => {
+    if (!isCodeVerified) return;
 
     const token = localStorage.getItem('accessToken');
-    if (!token) return;
+    if (!token) {
+      if (onLogout) onLogout();
+      return;
+    }
 
     const headers = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     };
 
-    const fetchLatestData = async () => {
+    const fetchAllSharedRecords = async () => {
+      setIsLoading(true);
+      setFetchError('');
       try {
-        const diariesRes = await fetch(`${API_BASE_URL}/diaries`, { headers });
-        if (diariesRes.ok) {
-          const dJson = await diariesRes.json();
-          if (dJson.success && Array.isArray(dJson.data) && dJson.data.length > 0) {
-            const sorted = [...dJson.data].sort(
-              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-            );
-            const latest = sorted[0];
-            setLastDiary({
-              title: latest.title,
-              dateText: formatDotDate(latest.created_at),
-              paragraphs: latest.content
-                .split(/\n+/)
-                .map((line: string) => line.trim())
-                .filter(Boolean),
-            });
-          }
+        const [diariesRes, capsulesRes, interviewsRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/diaries`, { headers }),
+          fetch(`${API_BASE_URL}/time-capsules`, { headers }),
+          fetch(`${API_BASE_URL}/interviews`, { headers }),
+        ]);
+
+        if (
+          diariesRes.status === 401 ||
+          capsulesRes.status === 401 ||
+          interviewsRes.status === 401
+        ) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('user');
+          if (onLogout) onLogout();
+          return;
         }
+
+        const [diariesJson, capsulesJson, interviewsJson] = await Promise.all([
+          diariesRes.json().catch(() => ({ success: false, data: [] })),
+          capsulesRes.json().catch(() => ({ success: false, data: [] })),
+          interviewsRes.json().catch(() => ({ success: false, data: [] })),
+        ]);
+
+        const combined: SharedRecordItem[] = [];
+
+        // 1. 일기 목록 처리
+        const diaries: DiaryApiItem[] =
+          diariesJson.success && Array.isArray(diariesJson.data) ? diariesJson.data : [];
+
+        if (diaries.length > 0) {
+          const sortedDiaries = [...diaries].sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          const latest = sortedDiaries[0];
+          setLastDiary({
+            title: latest.title,
+            dateText: formatDotDate(latest.created_at),
+            paragraphs: (latest.content || '')
+              .split(/\n+/)
+              .map((line) => line.trim())
+              .filter(Boolean),
+          });
+
+          sortedDiaries.forEach((d) => {
+            const plain = (d.content || '').replace(/\s+/g, ' ').trim();
+            combined.push({
+              id: `diary-${d.diary_id}`,
+              category: 'diary',
+              categoryLabel: '일기',
+              title: d.title,
+              subtitle: plain.slice(0, 40) || '기록된 일기',
+              content: d.content || '',
+              dateText: formatDotDate(d.created_at),
+              metaText: '일기 기록',
+              actionLabel: '일기 읽기',
+              timestamp: new Date(d.created_at).getTime() || 0,
+            });
+          });
+        } else {
+          setLastDiary(null);
+        }
+
+        // 2. 타임캡슐 목록 처리
+        const capsules: TimeCapsuleApiItem[] =
+          capsulesJson.success && Array.isArray(capsulesJson.data) ? capsulesJson.data : [];
+
+        const nowMs = Date.now();
+        capsules.forEach((cap) => {
+          const openMs = new Date(cap.open_date).getTime();
+          const isUnlocked = Boolean(cap.is_opened) || (!Number.isNaN(openMs) && openMs <= nowMs);
+          const formattedOpen = formatDotDate(cap.open_date);
+
+          combined.push({
+            id: `capsule-${cap.capsule_id}`,
+            category: 'capsule',
+            categoryLabel: '타임캡슐',
+            title: cap.title,
+            subtitle: isUnlocked ? '봉인이 해제된 편지' : `${formattedOpen} 개봉 예정`,
+            content: isUnlocked
+              ? cap.message || '전달된 타임캡슐 메시지입니다.'
+              : `이 타임캡슐은 ${formattedOpen}에 봉인이 해제됩니다.`,
+            dateText: formattedOpen,
+            metaText: isUnlocked ? '봉인 해제 완료' : '봉인 중',
+            actionLabel: '타임캡슐 읽기',
+            timestamp: openMs || 0,
+          });
+        });
+
+        // 3. 자서전 단원 목록 및 각 단원 상세(interviewQs) 조회
+        const interviews: InterviewApiItem[] =
+          interviewsJson.success && Array.isArray(interviewsJson.data)
+            ? interviewsJson.data
+            : [];
+
+        if (interviews.length > 0) {
+          const detailResults = await Promise.all(
+            interviews.map(async (iv) => {
+              try {
+                const detailRes = await fetch(
+                  `${API_BASE_URL}/interviews/${iv.interview_id}`,
+                  { headers }
+                );
+                if (!detailRes.ok) return { iv, questions: [] as InterviewQuestionApiItem[] };
+                const detailJson = await detailRes.json();
+                const questions: InterviewQuestionApiItem[] =
+                  detailJson.success && Array.isArray(detailJson.data?.questions)
+                    ? detailJson.data.questions
+                    : [];
+                return { iv, questions };
+              } catch {
+                return { iv, questions: [] as InterviewQuestionApiItem[] };
+              }
+            })
+          );
+
+          detailResults.forEach(({ iv, questions }) => {
+            const fullBody = questions
+              .map((q) => q.question_answer)
+              .filter(Boolean)
+              .join('\n\n');
+
+            combined.push({
+              id: `auto-${iv.interview_id}`,
+              category: 'autobiography',
+              categoryLabel: '자서전',
+              title: iv.chapter_name,
+              subtitle:
+                fullBody.replace(/\s+/g, ' ').trim().slice(0, 40) || '자서전 단원 기록',
+              content: fullBody || '작성된 자서전 본문이 없습니다.',
+              dateText: formatDotDate(iv.created_at),
+              metaText: `자서전 · ${questions.length}개 이야기`,
+              actionLabel: '자서전 읽기',
+              timestamp: iv.created_at ? new Date(iv.created_at).getTime() : 0,
+            });
+          });
+        }
+
+        combined.sort((a, b) => b.timestamp - a.timestamp);
+        setRecords(combined);
       } catch {
-        // 백엔드 미실행 시 기본 데이터 유지
+        setFetchError(
+          '서버(http://3.26.210.69:4000)에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.'
+        );
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchLatestData();
-  }, []);
+    fetchAllSharedRecords();
+  }, [isCodeVerified, onLogout]);
+
+  const displayName = user?.username || user?.account_id || '사용자';
 
   // 6자리 보안 초대 코드 입력 핸들러
   const handleCodeDigitChange = (index: number, rawValue: string) => {
@@ -345,7 +367,7 @@ export default function RecipientArchivePage({
     codeInputRefs.current[focusIdx]?.focus();
   };
 
-  // '기록 열람하기' 제출 검증 -> 틀리면 '코드가 잘못되었습니다' 팝업 출력
+  // '기록 열람하기' 제출 검증
   const handleVerifyInviteCode = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const enteredCode = codeDigits.join('');
@@ -366,7 +388,7 @@ export default function RecipientArchivePage({
     }, 50);
   };
 
-  // 탭별 개수 계산 (전체, 일기, 타임캡슐, 자서전)
+  // 탭별 개수 계산
   const categoryCounts = useMemo(() => {
     return {
       all: records.length,
@@ -376,7 +398,7 @@ export default function RecipientArchivePage({
     };
   }, [records]);
 
-  // 선택된 탭(전체 / 일기 / 타임캡슐 / 자서전)에 해당하는 기록만 필터링
+  // 선택된 탭에 해당하는 기록만 필터링
   const filteredRecords = useMemo(() => {
     if (activeCategory === 'all') return records;
     return records.filter((item) => item.category === activeCategory);
@@ -394,7 +416,7 @@ export default function RecipientArchivePage({
       onNavigate(path);
       return;
     }
-    alert(`'${label}' 화면으로 이동합니다. (임시 연결 경로: ${path})`);
+    alert(`'${label}' 화면으로 이동합니다. (${path})`);
   };
 
   // 전체 기록 PDF 저장
@@ -426,7 +448,6 @@ export default function RecipientArchivePage({
         {/* 1. 상단 고정 헤더 */}
         <header className="sticky top-0 z-30 w-full bg-[#FAF6F0]/95 backdrop-blur-sm border-b border-[#E8E1D9]">
           <div className="max-w-[1040px] mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
-            {/* 왼쪽 로고 */}
             <a
               href={ROUTES.main}
               onClick={(e) => handleHeaderLink(e, ROUTES.main, '메인 아카이브')}
@@ -445,7 +466,6 @@ export default function RecipientArchivePage({
               </span>
             </a>
 
-            {/* 중앙 네비게이션 메뉴 */}
             <nav className="hidden md:flex items-center gap-7 text-[13px] font-medium">
               <a
                 href={ROUTES.archive}
@@ -496,18 +516,17 @@ export default function RecipientArchivePage({
               </a>
             </nav>
 
-            {/* 오른쪽 사용자 프로필 영역 */}
             <div className="flex items-center gap-2.5">
               <a
                 href={ROUTES.profile}
-                onClick={(e) => handleHeaderLink(e, ROUTES.profile, `${user.username}님 프로필`)}
+                onClick={(e) => handleHeaderLink(e, ROUTES.profile, `${displayName}님 프로필`)}
                 className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-[#F2ECE3] hover:bg-[#E8DFD2] border border-[#E8E1D9] transition-colors"
               >
                 <span className="w-6 h-6 rounded-full bg-[#9B7348] text-white text-[11px] font-bold flex items-center justify-center">
-                  {(user.username || 'F').slice(0, 1).toUpperCase()}
+                  {displayName.slice(0, 1).toUpperCase()}
                 </span>
                 <span className="text-xs font-semibold text-[#3E2D1E]">
-                  {user.username || 'FIN'}님
+                  {displayName}님
                 </span>
               </a>
 
@@ -526,7 +545,6 @@ export default function RecipientArchivePage({
 
         {/* 메인 콘텐츠 컨테이너 */}
         <main className="max-w-[980px] mx-auto px-5 sm:px-8 py-7 sm:py-10">
-          {/* 상단 보안 상태 안내 바 */}
           <div className="flex items-center justify-between text-[11px] text-[#9E9286] mb-4">
             <span className="font-bold tracking-[0.14em] uppercase">PRIVATE ARCHIVE</span>
             <span>데드맨 스위치 · 타임캡슐</span>
@@ -550,174 +568,196 @@ export default function RecipientArchivePage({
             </p>
           </section>
 
-          {/* 3. 중간 카드: 마지막으로 작성한 일기 */}
-          <section className="bg-white border border-[#E8E1D9] rounded-3xl p-6 sm:p-10 shadow-2xs mb-11">
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-5 border-b border-[#F3EDE5]">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#9B7348]">
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                    <polyline points="22,6 12,13 2,6" />
-                  </svg>
-                  마지막으로 작성한 일기
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-[#F4EFE8] text-[10px] font-semibold text-[#8C7A68]">
-                  최종 기록
-                </span>
-              </div>
-
-              <span className="text-[11px] text-[#9E9286]">
-                작성일 {lastDiary.dateText}
-              </span>
+          {fetchError && (
+            <div className="mb-6 p-4 rounded-2xl bg-[#FCEEEA] border border-[#F3D1C8] text-xs text-[#A84A3A] font-medium no-print">
+              {fetchError}
             </div>
+          )}
 
-            <h2 className="font-['Noto_Serif_KR',serif] text-xl sm:text-[24px] font-semibold text-[#2C221A] mb-5">
-              {lastDiary.title}
-            </h2>
-
-            <div className="space-y-3.5 text-xs sm:text-[14px] text-[#4A3B2E] leading-7 mb-7">
-              {lastDiary.paragraphs.map((line, index) => (
-                <p key={index}>{line}</p>
-              ))}
+          {isLoading ? (
+            <div className="w-full py-24 text-center text-xs text-[#8C7A68]">
+              전달된 기록을 불러오는 중입니다...
             </div>
+          ) : (
+            <>
+              {/* 3. 중간 카드: 마지막으로 작성한 일기 */}
+              {lastDiary && (
+                <section className="bg-white border border-[#E8E1D9] rounded-3xl p-6 sm:p-10 shadow-2xs mb-11">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-5 border-b border-[#F3EDE5]">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#9B7348]">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                          <polyline points="22,6 12,13 2,6" />
+                        </svg>
+                        마지막으로 작성한 일기
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-[#F4EFE8] text-[10px] font-semibold text-[#8C7A68]">
+                        최종 기록
+                      </span>
+                    </div>
 
-            <div className="pt-4 border-t border-[#F3EDE5] flex items-center justify-between text-xs no-print">
-              <span className="text-[#9E9286]">마지막으로 남긴 일기 전문입니다.</span>
-              <button
-                type="button"
-                onClick={() => setIsLastDiaryModalOpen(true)}
-                className="font-semibold text-[#9B7348] hover:text-[#7A5734] transition-colors cursor-pointer"
-              >
-                일기 전문 보기 →
-              </button>
-            </div>
-          </section>
-
-          {/* 4. 당신에게 남긴 기록 (전체 / 일기 / 타임캡슐 / 자서전 필터 탭) */}
-          <section className="mb-10">
-            <div className="flex items-end justify-between mb-4">
-              <h2 className="font-['Noto_Serif_KR',serif] text-xl sm:text-2xl font-semibold text-[#2C221A]">
-                당신에게 남긴 기록
-              </h2>
-              <span className="text-xs text-[#9E9286]">
-                총 {filteredRecords.length}개의 기록
-              </span>
-            </div>
-
-            <div className="flex items-center gap-6 border-b border-[#E8E1D9] mb-6 text-xs sm:text-[13px] no-print">
-              {[
-                { key: 'all' as const, label: '전체', count: categoryCounts.all },
-                { key: 'diary' as const, label: '일기', count: categoryCounts.diary },
-                { key: 'capsule' as const, label: '타임캡슐', count: categoryCounts.capsule },
-                {
-                  key: 'autobiography' as const,
-                  label: '자서전',
-                  count: categoryCounts.autobiography,
-                },
-              ].map((tab) => {
-                const isSelected = activeCategory === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => setActiveCategory(tab.key)}
-                    className={`pb-3 transition-colors cursor-pointer flex items-center gap-1.5 ${
-                      isSelected
-                        ? 'font-bold text-[#2C221A] border-b-2 border-[#9B7348]'
-                        : 'font-medium text-[#8C7A68] hover:text-[#2C221A]'
-                    }`}
-                  >
-                    <span>{tab.label}</span>
-                    <span
-                      className={`text-[11px] ${
-                        isSelected ? 'text-[#9B7348] font-bold' : 'text-[#B5AAA0]'
-                      }`}
-                    >
-                      {tab.count}
+                    <span className="text-[11px] text-[#9E9286]">
+                      작성일 {lastDiary.dateText}
                     </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredRecords.map((item) => (
-                <article
-                  key={item.id}
-                  onClick={() => setSelectedRecord(item)}
-                  className="group bg-white hover:bg-[#FFFDF9] border border-[#E8E1D9] hover:border-[#C9B398] rounded-2xl overflow-hidden shadow-2xs hover:shadow-sm transition-all flex flex-col cursor-pointer"
-                >
-                  {item.category === 'autobiography' && (
-                    <div className="h-40 w-full bg-gradient-to-br from-[#8D5A36] to-[#6E4224] p-5 flex flex-col justify-between text-[#FAF6F0]">
-                      <span className="text-[9px] font-bold tracking-[0.16em] text-[#E5C9A8] uppercase">
-                        AUTOBIOGRAPHY
-                      </span>
-                      <p className="font-['Noto_Serif_KR',serif] text-lg font-semibold leading-snug line-clamp-2">
-                        {item.title}
-                      </p>
-                    </div>
-                  )}
-
-                  {item.category === 'capsule' && (
-                    <div className="h-40 w-full bg-[#EFE8DD] p-4 flex items-center justify-center">
-                      <div className="w-full h-full rounded-xl border border-[#DFD3C3] bg-[#FAF6F0]/80 flex flex-col items-center justify-center text-center px-3">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#C98E5B] mb-2" />
-                        <p className="font-['Noto_Serif_KR',serif] text-xs font-semibold text-[#5C4632]">
-                          {item.dateText}
-                        </p>
-                        <span className="text-[9px] tracking-[0.16em] text-[#9E9286] uppercase mt-1">
-                          A LETTER FOR YOU
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {item.category === 'diary' && (
-                    <div className="relative h-40 w-full bg-gradient-to-br from-[#DFC7AE] via-[#CBB092] to-[#9E8468] overflow-hidden p-4 flex items-end">
-                      <svg
-                        viewBox="0 0 320 160"
-                        className="absolute inset-0 w-full h-full opacity-40 group-hover:scale-105 transition-transform duration-500"
-                        preserveAspectRatio="none"
-                      >
-                        <circle cx="245" cy="44" r="22" fill="#FFFDF9" opacity="0.7" />
-                        <path
-                          d="M0 112 Q95 88 180 110 T320 98 L320 160 L0 160 Z"
-                          fill="#5C4632"
-                          opacity="0.55"
-                        />
-                      </svg>
-                      <span className="relative z-10 px-2.5 py-0.5 rounded-full bg-[#FAF6F0]/90 text-[#6E4E2E] text-[10px] font-bold">
-                        DIARY ARCHIVE
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="p-5 flex-1 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[11px] font-semibold text-[#9B7348] mb-1">
-                        {item.categoryLabel}
-                      </p>
-                      <h3 className="font-['Noto_Serif_KR',serif] text-base font-semibold text-[#2C221A] group-hover:text-[#9B7348] transition-colors line-clamp-1 mb-1">
-                        {item.title}
-                      </h3>
-                      <p className="text-xs text-[#7D6E60] line-clamp-1 mb-2">
-                        {item.subtitle}
-                      </p>
-                      <p className="text-[11px] text-[#A3978B]">
-                        {item.dateText} · {item.metaText}
-                      </p>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-[#F3EDE5] no-print">
-                      <span className="text-xs font-semibold text-[#9B7348] group-hover:translate-x-0.5 inline-block transition-transform">
-                        {item.actionLabel} →
-                      </span>
-                    </div>
                   </div>
-                </article>
-              ))}
-            </div>
-          </section>
+
+                  <h2 className="font-['Noto_Serif_KR',serif] text-xl sm:text-[24px] font-semibold text-[#2C221A] mb-5">
+                    {lastDiary.title}
+                  </h2>
+
+                  <div className="space-y-3.5 text-xs sm:text-[14px] text-[#4A3B2E] leading-7 mb-7">
+                    {lastDiary.paragraphs.map((line, index) => (
+                      <p key={index}>{line}</p>
+                    ))}
+                  </div>
+
+                  <div className="pt-4 border-t border-[#F3EDE5] flex items-center justify-between text-xs no-print">
+                    <span className="text-[#9E9286]">마지막으로 남긴 일기 전문입니다.</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsLastDiaryModalOpen(true)}
+                      className="font-semibold text-[#9B7348] hover:text-[#7A5734] transition-colors cursor-pointer"
+                    >
+                      일기 전문 보기 →
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {/* 4. 당신에게 남긴 기록 (전체 / 일기 / 타임캡슐 / 자서전 필터 탭) */}
+              <section className="mb-10">
+                <div className="flex items-end justify-between mb-4">
+                  <h2 className="font-['Noto_Serif_KR',serif] text-xl sm:text-2xl font-semibold text-[#2C221A]">
+                    당신에게 남긴 기록
+                  </h2>
+                  <span className="text-xs text-[#9E9286]">
+                    총 {filteredRecords.length}개의 기록
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-6 border-b border-[#E8E1D9] mb-6 text-xs sm:text-[13px] no-print">
+                  {[
+                    { key: 'all' as const, label: '전체', count: categoryCounts.all },
+                    { key: 'diary' as const, label: '일기', count: categoryCounts.diary },
+                    { key: 'capsule' as const, label: '타임캡슐', count: categoryCounts.capsule },
+                    {
+                      key: 'autobiography' as const,
+                      label: '자서전',
+                      count: categoryCounts.autobiography,
+                    },
+                  ].map((tab) => {
+                    const isSelected = activeCategory === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setActiveCategory(tab.key)}
+                        className={`pb-3 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'font-bold text-[#2C221A] border-b-2 border-[#9B7348]'
+                            : 'font-medium text-[#8C7A68] hover:text-[#2C221A]'
+                        }`}
+                      >
+                        <span>{tab.label}</span>
+                        <span
+                          className={`text-[11px] ${
+                            isSelected ? 'text-[#9B7348] font-bold' : 'text-[#B5AAA0]'
+                          }`}
+                        >
+                          {tab.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {filteredRecords.length === 0 ? (
+                  <div className="w-full py-16 text-center bg-white/70 border border-[#E8E1D9] rounded-2xl text-xs text-[#8C7A68]">
+                    전달된 기록이 아직 없습니다.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {filteredRecords.map((item) => (
+                      <article
+                        key={item.id}
+                        onClick={() => setSelectedRecord(item)}
+                        className="group bg-white hover:bg-[#FFFDF9] border border-[#E8E1D9] hover:border-[#C9B398] rounded-2xl overflow-hidden shadow-2xs hover:shadow-sm transition-all flex flex-col cursor-pointer"
+                      >
+                        {item.category === 'autobiography' && (
+                          <div className="h-40 w-full bg-gradient-to-br from-[#8D5A36] to-[#6E4224] p-5 flex flex-col justify-between text-[#FAF6F0]">
+                            <span className="text-[9px] font-bold tracking-[0.16em] text-[#E5C9A8] uppercase">
+                              AUTOBIOGRAPHY
+                            </span>
+                            <p className="font-['Noto_Serif_KR',serif] text-lg font-semibold leading-snug line-clamp-2">
+                              {item.title}
+                            </p>
+                          </div>
+                        )}
+
+                        {item.category === 'capsule' && (
+                          <div className="h-40 w-full bg-[#EFE8DD] p-4 flex items-center justify-center">
+                            <div className="w-full h-full rounded-xl border border-[#DFD3C3] bg-[#FAF6F0]/80 flex flex-col items-center justify-center text-center px-3">
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#C98E5B] mb-2" />
+                              <p className="font-['Noto_Serif_KR',serif] text-xs font-semibold text-[#5C4632]">
+                                {item.dateText}
+                              </p>
+                              <span className="text-[9px] tracking-[0.16em] text-[#9E9286] uppercase mt-1">
+                                A LETTER FOR YOU
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {item.category === 'diary' && (
+                          <div className="relative h-40 w-full bg-gradient-to-br from-[#DFC7AE] via-[#CBB092] to-[#9E8468] overflow-hidden p-4 flex items-end">
+                            <svg
+                              viewBox="0 0 320 160"
+                              className="absolute inset-0 w-full h-full opacity-40 group-hover:scale-105 transition-transform duration-500"
+                              preserveAspectRatio="none"
+                            >
+                              <circle cx="245" cy="44" r="22" fill="#FFFDF9" opacity="0.7" />
+                              <path
+                                d="M0 112 Q95 88 180 110 T320 98 L320 160 L0 160 Z"
+                                fill="#5C4632"
+                                opacity="0.55"
+                              />
+                            </svg>
+                            <span className="relative z-10 px-2.5 py-0.5 rounded-full bg-[#FAF6F0]/90 text-[#6E4E2E] text-[10px] font-bold">
+                              DIARY ARCHIVE
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="p-5 flex-1 flex flex-col justify-between">
+                          <div>
+                            <p className="text-[11px] font-semibold text-[#9B7348] mb-1">
+                              {item.categoryLabel}
+                            </p>
+                            <h3 className="font-['Noto_Serif_KR',serif] text-base font-semibold text-[#2C221A] group-hover:text-[#9B7348] transition-colors line-clamp-1 mb-1">
+                              {item.title}
+                            </h3>
+                            <p className="text-xs text-[#7D6E60] line-clamp-1 mb-2">
+                              {item.subtitle}
+                            </p>
+                            <p className="text-[11px] text-[#A3978B]">
+                              {item.dateText} · {item.metaText}
+                            </p>
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-[#F3EDE5] no-print">
+                            <span className="text-xs font-semibold text-[#9B7348] group-hover:translate-x-0.5 inline-block transition-transform">
+                              {item.actionLabel} →
+                            </span>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
 
           {/* 5. 맨 밑: 모든 기록 PDF 저장 배너 & 버튼 */}
           <section className="rounded-2xl bg-[#EFE7DC] border border-[#E3D6C5] p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5 mb-5 no-print">
@@ -782,13 +822,10 @@ export default function RecipientArchivePage({
         </main>
       </div>
 
-      {/* ===================================================================== */}
-      {/* [최초 진입 팝업] 보안 초대 코드 입력 모달 (피그마 시안 반영)           */}
-      {/* ===================================================================== */}
+      {/* [최초 진입 팝업] 보안 초대 코드 입력 모달 */}
       {!isCodeVerified && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-xs px-4">
           <div className="w-full max-w-[480px] bg-[#FFFDF8] border border-[#E8E1D9] rounded-2xl px-7 py-8 sm:px-9 sm:py-9 shadow-xl text-center">
-            {/* 상단 원형 열쇠 아이콘 */}
             <div className="w-11 h-11 rounded-full bg-[#F2ECE3] text-[#9B7348] flex items-center justify-center mx-auto mb-5">
               <svg
                 className="w-5 h-5"
@@ -805,7 +842,6 @@ export default function RecipientArchivePage({
               </svg>
             </div>
 
-            {/* 제목 & 안내 문구 */}
             <h2 className="font-['Noto_Serif_KR',serif] text-xl sm:text-[22px] font-bold text-[#2C221A] mb-2.5">
               보안 초대 코드를 입력해 주세요
             </h2>
@@ -815,7 +851,6 @@ export default function RecipientArchivePage({
               남겨진 기록을 확인하실 수 있습니다.
             </p>
 
-            {/* 6자리 코드 입력 폼 */}
             <form onSubmit={handleVerifyInviteCode}>
               <div className="flex items-center justify-center gap-2 sm:gap-2.5 mb-7">
                 {codeDigits.map((digit, idx) => (
@@ -845,14 +880,13 @@ export default function RecipientArchivePage({
               </button>
             </form>
 
-            {/* 하단 문의하기 안내 */}
             <p className="text-[11px] text-[#9E9286] mt-5">
               코드를 전달받지 못하셨나요?{' '}
               <button
                 type="button"
                 onClick={() =>
                   alert(
-                    `발송된 안내 문자 또는 이메일의 6자리 보안 코드를 확인해 주세요.\n(테스트용 보안 코드: ${VALID_INVITE_CODE})`
+                    `발송된 안내 문자 또는 이메일의 6자리 보안 코드를 확인해 주세요.\n(보안 코드: ${VALID_INVITE_CODE})`
                   )
                 }
                 className="text-[#8B6746] font-medium underline hover:text-[#2C221A] cursor-pointer"
@@ -864,9 +898,7 @@ export default function RecipientArchivePage({
         </div>
       )}
 
-      {/* ===================================================================== */}
-      {/* [오류 팝업] 정해진 코드와 일치하지 않을 때 '코드가 잘못되었습니다' 출력   */}
-      {/* ===================================================================== */}
+      {/* [오류 팝업] 정해진 코드와 일치하지 않을 때 '코드가 잘못되었습니다' 출력 */}
       {isCodeErrorModalOpen && (
         <div
           onClick={handleCloseErrorModal}
@@ -901,7 +933,7 @@ export default function RecipientArchivePage({
       )}
 
       {/* 마지막으로 작성한 일기 전문 보기 모달 */}
-      {isLastDiaryModalOpen && (
+      {isLastDiaryModalOpen && lastDiary && (
         <div
           onClick={() => setIsLastDiaryModalOpen(false)}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-xs px-4"

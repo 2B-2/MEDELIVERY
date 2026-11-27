@@ -20,11 +20,10 @@ const ROUTES = {
   profile: '/profile',
 } as const;
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 const DRAFT_STORAGE_KEY = 'medelivery_diary_draft';
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
-// API 명세서 v2.0 기준 타입 정의 (MEM-01, MEM-02)
 interface UserProfile {
   user_id: number;
   account_id: string;
@@ -45,32 +44,6 @@ interface DiaryWritePageProps {
 }
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
-
-// 백엔드 미실행 시에도 달력 점 표시와 최근 기록을 확인할 수 있는 기본 데이터
-const INITIAL_DIARIES: DiaryItem[] = [
-  {
-    diary_id: 3,
-    user_id: 1,
-    title: '겨울 끝의 포근한 저녁',
-    content:
-      '오늘은 유난히 노을이 오래 머물렀다. 집으로 돌아오는 길, 붉게 물든 하늘을 한참 올려다보았다.',
-    created_at: '2026-11-18T20:24:00.000Z',
-  },
-  {
-    diary_id: 2,
-    user_id: 1,
-    title: '엄마와 걷던 길',
-    content: '오랜만에 천천히 동네를 걸었다. 사소한 대화들이 오래도록 마음에 남는다.',
-    created_at: '2026-11-15T15:10:00.000Z',
-  },
-  {
-    diary_id: 1,
-    user_id: 1,
-    title: '오랜만에 만난 우리',
-    content: '못다 한 이야기를 한참 나눴다. 웃음이 끊이지 않던 고마운 오후.',
-    created_at: '2026-11-10T14:20:00.000Z',
-  },
-];
 
 function toDateKey(date: Date): string {
   const yyyy = date.getFullYear();
@@ -103,12 +76,9 @@ function formatRecentDateLabel(dateString: string, todayKey: string): string {
 }
 
 export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageProps) {
-  const [user, setUser] = useState<UserProfile>({
-    user_id: 1,
-    account_id: 'fin_user',
-    username: 'FIN',
-  });
-  const [diaries, setDiaries] = useState<DiaryItem[]>(INITIAL_DIARIES);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [diaries, setDiaries] = useState<DiaryItem[]>([]);
+  const [isLoadingDiaries, setIsLoadingDiaries] = useState<boolean>(true);
 
   // 오늘 날짜 상태 (자정이 지나 하루가 바뀌면 자동으로 날짜 갱신)
   const [today, setToday] = useState<Date>(() => new Date());
@@ -141,7 +111,7 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
         }
         return prevToday;
       });
-    }, 30 * 1000); // 30초 간격으로 날짜 변경 감지
+    }, 30 * 1000);
 
     return () => clearInterval(timer);
   }, []);
@@ -151,10 +121,9 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
       try {
-        const parsed = JSON.parse(savedUser);
-        setUser((prev) => ({ ...prev, ...parsed }));
+        setUser(JSON.parse(savedUser));
       } catch {
-        // 기본값 유지
+        // 파싱 실패 시 무시
       }
     }
 
@@ -171,9 +140,14 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
     }
 
     const token = localStorage.getItem('accessToken');
-    if (!token) return;
+    if (!token) {
+      setIsLoadingDiaries(false);
+      if (onLogout) onLogout();
+      return;
+    }
 
     const fetchDiaries = async () => {
+      setIsLoadingDiaries(true);
       try {
         const response = await fetch(`${API_BASE_URL}/diaries`, {
           headers: {
@@ -181,6 +155,14 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
             Authorization: `Bearer ${token}`,
           },
         });
+
+        if (response.status === 401) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('user');
+          if (onLogout) onLogout();
+          return;
+        }
+
         if (response.ok) {
           const result = await response.json();
           if (result.success && Array.isArray(result.data)) {
@@ -188,12 +170,14 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
           }
         }
       } catch {
-        // 백엔드 미실행 시 기본 샘플 데이터 유지
+        // 네트워크 오류 시 빈 목록 유지
+      } finally {
+        setIsLoadingDiaries(false);
       }
     };
 
     fetchDiaries();
-  }, []);
+  }, [onLogout]);
 
   // 3. 입력 내용 자동 임시 저장 (상단 우측 '임시 저장됨' 표시 연동)
   useEffect(() => {
@@ -212,6 +196,8 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
 
     return () => clearTimeout(timeout);
   }, [title, content]);
+
+  const displayName = user?.username || user?.account_id || '사용자';
 
   // 일기를 작성한 날짜 목록 (달력 날짜 아래 작은 동그라미 표시용)
   const writtenDateSet = useMemo(() => {
@@ -253,7 +239,7 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
       return;
     }
     if (label) {
-      alert(`'${label}' 화면으로 이동합니다. (임시 주소: ${path})`);
+      alert(`'${label}' 화면으로 이동합니다. (${path})`);
     }
   };
 
@@ -326,52 +312,65 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
       return;
     }
 
-    setIsSaving(true);
     const token = localStorage.getItem('accessToken');
+    if (!token) {
+      alert('로그인이 필요합니다.');
+      if (onLogout) onLogout();
+      return;
+    }
+
+    // 선택한 날짜가 오늘이 아니면 선택한 날짜 기준 시각, 오늘이면 현재 시각 전달
+    const now = new Date();
+    const isTodaySelected = toDateKey(selectedDate) === toDateKey(now);
+    const createdAtIso = isTodaySelected
+      ? now.toISOString()
+      : new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          selectedDate.getDate(),
+          now.getHours(),
+          now.getMinutes(),
+          now.getSeconds()
+        ).toISOString();
+
+    setIsSaving(true);
 
     try {
-      if (token) {
-        const response = await fetch(`${API_BASE_URL}/diaries`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            title: title.trim(),
-            content: content.trim(),
-          }),
-        });
+      const response = await fetch(`${API_BASE_URL}/diaries`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          content: content.trim(),
+          created_at: createdAtIso,
+        }),
+      });
 
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && result.data) {
-            setDiaries((prev) => [result.data, ...prev]);
-            localStorage.removeItem(DRAFT_STORAGE_KEY);
-            alert('일기가 저장되었습니다.');
-            goToRoute(ROUTES.diaryList, '일기장 전체보기');
-            return;
-          }
-        }
+      if (response.status === 401) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('user');
+        if (onLogout) onLogout();
+        return;
       }
+
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data) {
+        alert(result?.error?.message || '일기 저장 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setDiaries((prev) => [result.data, ...prev]);
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      alert('일기가 저장되었습니다.');
+      goToRoute(ROUTES.diaryList, '일기장 전체보기');
     } catch {
-      // 백엔드 서버가 꺼져 있을 때 로컬 상태 반영 후 이동
+      alert('서버(http://3.26.210.69:4000)에 연결할 수 없어 일기를 저장하지 못했습니다.');
     } finally {
       setIsSaving(false);
     }
-
-    // 프론트엔드 단독 실행 시 즉시 달력 점·최근 기록 반영 후 전체보기로 이동
-    const newDiary: DiaryItem = {
-      diary_id: Date.now(),
-      user_id: user.user_id,
-      title: title.trim(),
-      content: content.trim(),
-      created_at: selectedDate.toISOString(),
-    };
-    setDiaries((prev) => [newDiary, ...prev]);
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
-    alert(`"${newDiary.title}" 일기가 저장되었습니다.`);
-    goToRoute(ROUTES.diaryList, '일기장 전체보기');
   };
 
   const todayKey = toDateKey(today);
@@ -450,20 +449,20 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
             </a>
           </nav>
 
-         {/* 오른쪽 사용자 프로필 영역 */}
+          {/* 오른쪽 사용자 프로필 영역 */}
           <div className="flex items-center gap-2.5">
             <a
               href={ROUTES.profile}
               onClick={(e) =>
-                handleHeaderLink(e, ROUTES.profile, `${user.username}님 프로필 및 데드맨 스위치 설정`)
+                handleHeaderLink(e, ROUTES.profile, `${displayName}님 프로필 및 데드맨 스위치 설정`)
               }
               className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-[#F2ECE3] hover:bg-[#E8DFD2] border border-[#E8E1D9] transition-colors"
             >
               <span className="w-6 h-6 rounded-full bg-[#9B7348] text-white text-[11px] font-bold flex items-center justify-center">
-                {(user.username || 'F').slice(0, 1).toUpperCase()}
+                {displayName.slice(0, 1).toUpperCase()}
               </span>
               <span className="text-xs font-semibold text-[#3E2D1E]">
-                {user.username || 'FIN'}님
+                {displayName}님
               </span>
             </a>
 
@@ -495,7 +494,7 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
             <p className="text-xs text-[#8C7A68]">작은 순간들을 천천히 모아보세요.</p>
           </div>
 
-          {/* 달력 카드 (날짜 자동 갱신 + 일기 작성일 아래 작은 동그라미 표시) */}
+          {/* 달력 카드 */}
           <div className="bg-white border border-[#E8E1D9] rounded-2xl p-4 shadow-2xs">
             <div className="flex items-center justify-between mb-3.5 px-1">
               <button
@@ -523,7 +522,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
               </button>
             </div>
 
-            {/* 요일 행 */}
             <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-[#9E9286] mb-1.5">
               {WEEKDAYS.map((day) => (
                 <span key={day} className="py-1">
@@ -532,7 +530,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
               ))}
             </div>
 
-            {/* 날짜 셀 */}
             <div className="grid grid-cols-7 gap-y-1 text-center">
               {calendarCells.map((dateObj, idx) => {
                 if (!dateObj) {
@@ -564,7 +561,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
                   >
                     <span className="leading-none">{dateObj.getDate()}</span>
 
-                    {/* 일기를 작성한 날에는 날짜 아래에 작은 동그라미 표시 */}
                     {hasWrittenDiary && (
                       <span
                         className={`w-1.5 h-1.5 rounded-full mt-1 ${
@@ -578,7 +574,7 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
             </div>
           </div>
 
-          {/* 최근 기록 (여태까지 작성한 일기 제목 목록) */}
+          {/* 최근 기록 */}
           <div className="flex-1 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-bold text-[#2C221A]">
@@ -593,7 +589,9 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
               </a>
             </div>
 
-            {recentDiaries.length === 0 ? (
+            {isLoadingDiaries ? (
+              <p className="text-xs text-[#9E9286] py-4">기록을 불러오는 중...</p>
+            ) : recentDiaries.length === 0 ? (
               <p className="text-xs text-[#9E9286] py-4">
                 아직 작성된 일기가 없습니다.
               </p>
@@ -629,7 +627,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
         {/* 오른쪽 메인 에디터: 일기 작성 및 사진 첨부 */}
         <main className="px-5 sm:px-10 py-8 sm:py-10 flex flex-col justify-between">
           <div>
-            {/* 상단 타이틀 및 임시 저장 상태 */}
             <div className="flex items-end justify-between gap-4 mb-6">
               <div>
                 <p className="text-[10px] font-bold tracking-[0.14em] text-[#9B7348] uppercase mb-1">
@@ -650,10 +647,8 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
               )}
             </div>
 
-            {/* 일기 작성 흰색 카드 */}
             <form id="diary-write-form" onSubmit={handleSaveDiary}>
               <div className="bg-white border border-[#E8E1D9] rounded-3xl p-6 sm:p-10 shadow-2xs">
-                {/* 선택된 날짜 표시 */}
                 <div className="flex items-center gap-2 text-xs text-[#8C7A68] mb-5">
                   <svg className="w-3.5 h-3.5 text-[#9B7348]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -664,7 +659,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
                   <span>{formatKoreanFullDate(selectedDate)}</span>
                 </div>
 
-                {/* 일기 제목 입력 */}
                 <input
                   type="text"
                   value={title}
@@ -673,7 +667,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
                   className="w-full font-['Noto_Serif_KR',serif] text-2xl sm:text-[26px] font-semibold text-[#2C221A] placeholder:text-[#C5B9AC] focus:outline-none"
                 />
 
-                {/* 에디터 서식 툴바 */}
                 <div className="flex items-center gap-4 py-3 my-4 border-y border-[#F2ECE3] text-xs text-[#6E5D4F]">
                   <button
                     type="button"
@@ -726,7 +719,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
                   </label>
                 </div>
 
-                {/* 일기 본문 입력창 */}
                 <textarea
                   ref={textareaRef}
                   value={content}
@@ -736,7 +728,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
                   className="w-full text-sm sm:text-[15px] text-[#3E2D1E] placeholder:text-[#B5AAA0] leading-8 resize-none focus:outline-none mb-6"
                 />
 
-                {/* 사진 첨부 드롭존 (클릭 및 드래그 앤 드롭 지원) */}
                 <label
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -806,7 +797,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
             </form>
           </div>
 
-          {/* 하단 글자 수 카운트 및 일기 저장 버튼 */}
           <div className="flex items-center justify-end gap-4 mt-5">
             <span className="text-xs text-[#9E9286]">
               공백 포함 {content.length}자
@@ -827,7 +817,6 @@ export default function DiaryWritePage({ onLogout, onNavigate }: DiaryWritePageP
         </main>
       </div>
 
-      {/* 왼쪽 '최근 기록' 제목 클릭 시 열리는 간편 열람 모달 */}
       {previewDiary && (
         <div
           onClick={() => setPreviewDiary(null)}

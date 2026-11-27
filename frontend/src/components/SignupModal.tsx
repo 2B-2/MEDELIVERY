@@ -5,7 +5,7 @@ interface SignupModalProps {
   onClose: () => void;
 }
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'http://3.26.210.69:4000/api';
 const DEADMAN_DAY_OPTIONS = [14, 30, 60, 90] as const;
 
 export default function SignupModal({ isOpen, onClose }: SignupModalProps) {
@@ -40,14 +40,25 @@ export default function SignupModal({ isOpen, onClose }: SignupModalProps) {
 
   const handleNextStep = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!userId.trim() || !password.trim()) {
+    const trimmedId = userId.trim();
+
+    if (!trimmedId || !password.trim()) {
       setErrorMessage('아이디와 비밀번호를 입력해 주세요.');
+      return;
+    }
+    if (trimmedId.length < 2 || trimmedId.length > 50) {
+      setErrorMessage('아이디는 2자 이상 50자 이하로 입력해 주세요.');
+      return;
+    }
+    if (password.length < 8) {
+      setErrorMessage('비밀번호는 8자 이상이어야 합니다.');
       return;
     }
     if (password !== passwordConfirm) {
       setErrorMessage('비밀번호가 일치하지 않습니다.');
       return;
     }
+
     setErrorMessage('');
     setStep(2);
   };
@@ -56,41 +67,41 @@ export default function SignupModal({ isOpen, onClose }: SignupModalProps) {
     setIsSubmitting(true);
     setErrorMessage('');
 
-    const finalUsername = name.trim() || userId.trim();
+    const trimmedId = userId.trim();
+    const finalUsername = name.trim() || trimmedId;
     const finalContact = skipDeadman ? '' : recipientPhone.trim();
     const finalDays = skipDeadman ? 90 : deadmanDays;
 
     try {
-      // MEDELIVERY API v2.0 [ACC-01] 회원가입 요청
+      // MEDELIVERY API v2.0 [ACC-01] 실제 회원가입 요청
       const response = await fetch(`${API_BASE_URL}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          account_id: userId.trim(),
-          userId: userId.trim(),
+          account_id: trimmedId,
           password,
           username: finalUsername,
-          name: finalUsername,
           emergency_contact: finalContact,
-          recipientPhone: finalContact,
           inactivity_days: finalDays,
-          deadmanDays: finalDays,
         }),
       });
 
       const result = await response.json();
       if (!response.ok || !result.success) {
-        setErrorMessage(result.error?.message || '회원가입 처리 중 오류가 발생했습니다.');
-        setIsSubmitting(false);
+        setErrorMessage(
+          result?.error?.message ||
+            result?.message ||
+            '회원가입 처리 중 오류가 발생했습니다.'
+        );
         return;
       }
 
       alert('회원가입이 완료되었습니다. 로그인해 주세요.');
       resetAndClose();
     } catch {
-      // 백엔드 미실행 상태에서도 화면 흐름 확인 가능하도록 완료 처리
-      alert(`회원가입 입력이 완료되었습니다. (${finalUsername}님)\n로그인 버튼을 눌러 메인 화면으로 이동하세요.`);
-      resetAndClose();
+      setErrorMessage(
+        '서버(http://3.26.210.69:4000)에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -132,7 +143,7 @@ export default function SignupModal({ isOpen, onClose }: SignupModalProps) {
                   type="text"
                   value={userId}
                   onChange={(e) => setUserId(e.target.value)}
-                  placeholder="로그인에 사용할 아이디"
+                  placeholder="로그인에 사용할 아이디 (2자 이상)"
                   className="w-full h-10 px-3.5 text-xs bg-white border border-[#E8E1D9] rounded-xl focus:outline-none focus:border-[#9B7348]"
                 />
               </div>
@@ -158,7 +169,7 @@ export default function SignupModal({ isOpen, onClose }: SignupModalProps) {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="비밀번호 입력"
+                  placeholder="8자 이상 입력"
                   className="w-full h-10 px-3.5 text-xs bg-white border border-[#E8E1D9] rounded-xl focus:outline-none focus:border-[#9B7348]"
                 />
               </div>
