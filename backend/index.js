@@ -61,7 +61,7 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'MEDELIVERY Backend API' });
 });
 
-// 현재 디스크(.medelivery-data.json)에 저장된 전체 데이터 요약 조회 (로그인 없이도 저장 상태 즉시 확인 가능)
+// 현재 디스크(.medelivery-data.json)에 저장된 전체 데이터 요약 조회
 app.get('/api/store-status', (req, res) => {
   res.status(200).json({
     success: true,
@@ -89,11 +89,6 @@ app.post('/api/reset-store', (req, res) => {
     success: true,
     message: '모든 로컬 저장 데이터(data.json)가 초기 상태로 깨끗하게 리셋되었습니다.',
   });
-});
-
-// 브라우저 웹 테스트 콘솔 (/test 또는 /)
-app.get(['/', '/test'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'test.html'));
 });
 
 // 수신자 전용 타임캡슐 6자리 보안 초대 코드 입력 & PDF 다운로드 페이지 (/capsule-view)
@@ -133,6 +128,17 @@ app.get('/email-preview/:id', (req, res) => {
     </body>
     </html>
   `);
+});
+
+/* ------------------------------------------------------------------ */
+/* 빌드된 React 프론트엔드(frontend/dist) 정적 서빙 및 SPA 라우팅       */
+/* ------------------------------------------------------------------ */
+const frontendDistPath = path.join(__dirname, '../frontend/dist');
+app.use(express.static(frontendDistPath));
+
+// /api 로 시작하지 않는 모든 경로(/, /login, /main, /diaries 등)는 React index.html 반환
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
 /* ------------------------------------------------------------------ */
